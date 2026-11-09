@@ -418,15 +418,24 @@ def main():
             if at_war and war_start is None:
                 war_start = now
             if drawn and not at_war and not a.dry_run:
-                # the game sometimes drops an army's front line on its own (no command does it): draw it again
+                # the game sometimes drops an army's front line or offensive line on its own (no command does it):
+                # draw it again
                 from hoi4ai.memory import Process
                 proc = Process()
-                lost = [(aid, *p, [d.id for d in divs if d.owner == tag and d.army == aid])
-                        for aid, p in sorted(drawn.items()) if not plans.lines(proc, aid)]
+                lost, fixed = [], []
+                for aid, p in sorted(drawn.items()):
+                    ds = [d.id for d in divs if d.owner == tag and d.army == aid]
+                    have = plans.arrows(proc, aid)
+                    if not have:
+                        lost.append((aid, *p, ds))
+                    elif not any(have.values()) and ds:
+                        r = send(f"bridge.plan arrow {aid} #{min(have)} {p[3]} " + " ".join(map(str, ds)))[0]
+                        print(f"redrawn: army {aid}: offensive to {p[3]} on line {min(have)}: {r}")
+                        fixed.append(aid)
                 for aid, ok, line in plans.draw(proc, lost):
                     print("redrawn:", line)
-                if lost and not a.execute:
-                    for line in plans.cohesion([x[0] for x in lost]):
+                if (lost or fixed) and not a.execute:
+                    for line in plans.cohesion([x[0] for x in lost] + fixed):
                         print(line)
             if planned and a.execute and at_war and not executed:
                 for line in plans.execute(sorted(planned)):

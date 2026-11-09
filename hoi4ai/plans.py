@@ -225,6 +225,24 @@ def lines(proc, army_id):
     return out
 
 
+def arrows(proc, army_id):
+    """{front line id: how many offensive lines it has}. A front line's offensive lines are a vector at +0x1f8 of
+    its COrderInstance (count 1 on every army with an arrow, 0 on one the game had dropped the arrow of)."""
+    a = _addr(53, army_id)
+    if not a:
+        return {}
+    rd = lambda addr, n: int.from_bytes(proc.read(addr, n), "little")
+    out = {}
+    try:
+        data, n = rd(a + 0x98, 8), rd(a + 0xa4, 4)
+        for k in range(n if data and n < 2000 else 0):
+            o = rd(data + k * 8, 8)
+            out[rd(o + 0x244, 4)] = rd(o + 0x1f8 + 12, 4)
+    except (OSError, TypeError):
+        pass
+    return out
+
+
 def clear(proc, army_ids):
     """Delete every line of these armies (the game AI's, or ours from before). Returns reply lines."""
     out = []
