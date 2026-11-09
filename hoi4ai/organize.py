@@ -31,7 +31,7 @@ def _chunks(items, size):
 
 
 def plan(m, ctrl, divisions, my_tag, me, target, fast_units, leaders, friends=(),
-         infantry_armies=4, army_size=ARMY_SIZE, group_size=GROUP_SIZE):
+         infantry_armies=4, army_size=ARMY_SIZE, group_size=GROUP_SIZE, along=None):
     """Returns (group armies, other armies, field marshal or None)."""
     land = {p for p in m.provinces if m.is_land(p)}
     ours = {me} | set(friends)
@@ -77,7 +77,10 @@ def plan(m, ctrl, divisions, my_tag, me, target, fast_units, leaders, friends=()
         group.append(Army("fast", sorted(fast, key=lambda d: d.id)[:army_size]))
         rest += [d for d in fast if d not in group[0].divisions]
     if front_line:
-        front_line.sort(key=lambda d: (m.provinces[d.province].y, m.provinces[d.province].x))  # north to south
+        if along:  # along the border, in the game's own order (front lines are stretches of it)
+            front_line.sort(key=lambda d: along.get(d.province, 2.0))
+        else:
+            front_line.sort(key=lambda d: (m.provinces[d.province].y, m.provinces[d.province].x))  # north to south
         for i, chunk in enumerate(_chunks(front_line, army_size)[:group_size - len(group)]):
             group.append(Army("infantry %d" % (i + 1), chunk))
     placed = {d.id for a in group for d in a.divisions}

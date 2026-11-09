@@ -86,10 +86,28 @@ def sections(proc, me, target, ctrl, max_misses=40):
     return out
 
 
+def along(m, secs, own):
+    """{province: position along the border (0..1, the sections in turn)} for our provinces, each taking the
+    position of its nearest border province (through our land)."""
+    pos = {}
+    for sec in secs:
+        span = sec.end - sec.start
+        for i, p in enumerate(sec.ours):
+            pos.setdefault(p, sec.start + (i + 0.5) / len(sec.ours) * span)
+    todo = collections.deque(pos)
+    while todo:
+        p = todo.popleft()
+        for n in m.neighbours.get(p, {}):
+            if n not in pos and n in own:
+                pos[n] = pos[p]
+                todo.append(n)
+    return pos
+
+
 def make(m, armies, secs, vps, ctrl, target, near=4, reach=3, always=()):
     """armies: {army id: [divisions]}; secs: [Section]; vps: {province: victory points} of the target.
-    Returns [(army id, front id, start, end, target province, [division ids])]: each army on the section nearest
-    to it, armies along a section in the order they stand, each with a stretch as long as its share; its offensive
+    Returns [(army id, front id, start, end, target province, [division ids])]: each army's front line on the
+    stretch of border where its divisions stand (the middle 80% of them, along the border); its offensive
     line to the most valuable victory point within NEAR provinces across its stretch (else the nearest)."""
     pv = m.provinces
 
@@ -108,59 +126,92 @@ def make(m, armies, secs, vps, ctrl, target, near=4, reach=3, always=()):
                 if n not in away and m.is_land(n):
                     away[n] = away[p] + 1
                     todo.append(n)
-    on = collections.defaultdict(list)
+    pos = along(m, secs, {p for p in m.provinces if m.is_land(p)} - {p for p in m.provinces if ctrl[p] == target})
+    out = []
     for aid, ds in armies.items():
         if not ds or (aid not in always and sum(d.province in away for d in ds) < len(ds) / 2):
             continue
-        xy = (sum(pv[d.province].x for d in ds) / len(ds), sum(pv[d.province].y for d in ds) / len(ds))
-        k = min(range(len(secs)), key=lambda j: min(d2(p, xy) for p in secs[j].ours))
-        on[k].append((min(range(len(secs[k].ours)), key=lambda j: d2(secs[k].ours[j], xy)), aid))
-    out = []
-    for k, lst in on.items():
-        sec = secs[k]
-        lst.sort()
-        total = sum(len(armies[a]) for _, a in lst)
-        at = 0.0
-        for _, aid in lst:
-            a0, at = at, at + len(armies[aid]) / total
-            stretch = sec.ours[int(a0 * len(sec.ours)):max(int(a0 * len(sec.ours)) + 1, int(at * len(sec.ours)))]
-            across = {q for p in stretch for q in m.neighbours.get(p, {}) if ctrl[q] == target}
-            dist = {q: 1 for q in across}
-            todo = collections.deque(across)
-            while todo:  # through the target's land only
-                p = todo.popleft()
-                if dist[p] >= near:
-                    continue
-                for n in m.neighbours.get(p, {}):
-                    if n not in dist and ctrl[n] == target:
-                        dist[n] = dist[p] + 1
-                        todo.append(n)
-            cands = [q for q in vps if q in dist]
-            if cands:
-                tgt = max(cands, key=lambda q: (vps[q] / (1 + dist[q]), -dist[q]))
-            else:
-                mid = stretch[len(stretch) // 2]
-                tgt = min(vps, key=lambda q: d2(q, (pv[mid].x, pv[mid].y)))
-            span = sec.end - sec.start
-            out.append((aid, sec.front, int((sec.start + a0 * span) * FULL), int((sec.start + at * span) * FULL),
-                        tgt, [d.id for d in armies[aid]]))
+        # the stretch where the army's divisions stand (the middle 80% of them), on the section most of them face
+        at = sorted(pos[d.province] for d in ds if d.province in pos)
+        if not at:
+            continue
+        sec = min(secs, key=lambda x: (not x.start <= at[len(at) // 2] <= x.end, abs((x.start + x.end) / 2 - at[len(at) // 2])))
+        at = [min(max(v, sec.start), sec.end) for v in at]
+        lo, hi = at[int(len(at) * 0.1)], at[min(len(at) - 1, int(len(at) * 0.9))]
+        span = sec.end - sec.start
+        i0 = int((lo - sec.start) / span * len(sec.ours))
+        i1 = max(i0 + 1, min(len(sec.ours), int((hi - sec.start) / span * len(sec.ours)) + 1))
+        lo, hi = sec.start + i0 / len(sec.ours) * span, sec.start + i1 / len(sec.ours) * span
+        stretch = sec.ours[i0:i1]
+        across = {q for p in stretch for q in m.neighbours.get(p, {}) if ctrl[q] == target}
+        dist = {q: 1 for q in across}
+        todo = collections.deque(across)
+        while todo:  # through the target's land only
+            p = todo.popleft()
+            if dist[p] >= near:
+                continue
+            for n in m.neighbours.get(p, {}):
+                if n not in dist and ctrl[n] == target:
+                    dist[n] = dist[p] + 1
+                    todo.append(n)
+        cands = [q for q in vps if q in dist]
+        if cands:
+            tgt = max(cands, key=lambda q: (vps[q] / (1 + dist[q]), -dist[q]))
+        else:
+            mid = stretch[len(stretch) // 2]
+            tgt = min(vps, key=lambda q: d2(q, (pv[mid].x, pv[mid].y)))
+        out.append((aid, sec.front, int(lo * FULL), int(hi * FULL), tgt, [d.id for d in ds]))
     return out
 
 
-def draw(plans):
-    """Send the front lines and offensive lines. Returns [(army id, ok, reply line)]."""
+def lines(proc, army_id):
+    """The army's lines as the game holds them: [(line id, [(our province, their province)..])]. An army's
+    COrdersGroup lists its COrderInstances at +0x98; each has its id at +0x244 and its border pairs at +0x88."""
+    a = _addr(53, army_id)
+    if not a:
+        return []
+
+    def vec(addr):
+        data = int.from_bytes(proc.read(addr, 8), "little")
+        n = int.from_bytes(proc.read(addr + 12, 4), "little")
+        return [int.from_bytes(proc.read(data + k * 8, 8), "little") for k in range(n)] if data and n < 2000 else []
+
+    out = []
+    try:
+        for o in vec(a + 0x98):
+            lid = int.from_bytes(proc.read(o + 0x244, 4), "little")
+            provs = [int.from_bytes(proc.read(p + 0xa4, 4), "little") for p in vec(o + 0x88)]
+            out.append((lid, list(zip(provs[0::2], provs[1::2]))))
+    except (OSError, TypeError):
+        pass
+    return out
+
+
+def clear(proc, army_ids):
+    """Delete every line of these armies (the game AI's, or ours from before). Returns reply lines."""
+    out = []
+    for aid in army_ids:
+        ids = [lid for lid, _ in lines(proc, aid)]
+        if ids:
+            out.append(f"army {aid}: " + send(f"bridge.plan delete {aid} " + " ".join(map(str, ids)))[0])
+    return out
+
+
+def draw(proc, plans):
+    """Send the front lines, then each offensive line on its army's new front line. Returns [(army id, ok, line)]."""
     out = []
     for aid, fid, start, end, tgt, dids in plans:
         ds = " ".join(map(str, dids))
+        before = {lid for lid, _ in lines(proc, aid)}
         r1 = send(f"bridge.plan front {aid} {fid} {start} {end} {ds}")[0]
-        r2 = send(f"bridge.plan arrow {aid} {tgt} {ds}")[0] if r1.startswith("OK") else "-"
-        out.append((aid, r1.startswith("OK"),
-                    f"army {aid}: front {fid} {start / 1000:.0f}-{end / 1000:.0f}%: {r1}; offensive to {tgt}: {r2}"))
+        new = [lid for lid, _ in lines(proc, aid) if lid not in before]
+        if r1.startswith("OK") and new:
+            r2 = send(f"bridge.plan arrow {aid} #{new[0]} {tgt} {ds}")[0]
+        else:
+            r2 = "-"
+        out.append((aid, r1.startswith("OK"), f"army {aid}: front {fid} {start / 1000:.0f}-{end / 1000:.0f}% "
+                                               f"(line {new[0] if new else '?'}): {r1}; offensive to {tgt}: {r2}"))
     return out
-
-
-def delete(army_ids):
-    return [f"army {a}: " + send(f"bridge.plan delete {a}")[0] for a in army_ids]
 
 
 IMMOBILE = 3  # cohesion: 0 flexible, 1 balanced, 2 rigid, 3 immobile

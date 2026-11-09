@@ -130,7 +130,11 @@ def build_structure(m, provinces, divs, tag, me, tgt, fast_units, friend_ids, ca
     """Build the armies, generals and the army group (hoi4ai/organize.py) with bridge.army.
     Returns (summary lines, army group id or 0, the group's army ids, {division id: army id})."""
     lead = leaders_mod.load(tag, os.path.join(cache, "leaders.tsv"))
-    group, others, marshal = organize.plan(m, provinces.controller, divs, tag, me, tgt, fast_units, lead, friend_ids)
+    from hoi4ai.memory import Process
+    secs = plans.sections(Process(), me, tgt, provinces.controller)
+    own = {p for p in m.provinces if m.is_land(p) and provinces.controller[p] in {me, *friend_ids}}
+    group, others, marshal = organize.plan(m, provinces.controller, divs, tag, me, tgt, fast_units, lead, friend_ids,
+                                           along=plans.along(m, secs, own) if secs else None)
     lines, group_ids, membership = [], [], {}
     for army in group + others:
         r = send("bridge.army create " + " ".join(str(d.id) for d in army.divisions))[0]
@@ -255,13 +259,15 @@ def main():
         divs0 = snap.take()
         # every army that stands at the border (the fast one too); a restart redraws the plans
         planning = sorted({d.army for d in divs0 if d.owner == tag and d.army})
-        plans.delete(planning)
-        secs = plans.sections(Process(), me, tgt, provinces.controller)
+        proc = Process()
+        for line in plans.clear(proc, planning):  # the game AI's lines, or ours from before a restart
+            print(line)
+        secs = plans.sections(proc, me, tgt, provinces.controller)
         vps = {p: v for st in m.states.values() for p, v in st.victory_points.items()
                if provinces.controller[p] == tgt}
         if secs and vps:
             armies = {aid: [d for d in divs0 if d.owner == tag and d.army == aid] for aid in planning}
-            for aid, ok, line in plans.draw(plans.make(m, armies, secs, vps, provinces.controller, tgt,
+            for aid, ok, line in plans.draw(proc, plans.make(m, armies, secs, vps, provinces.controller, tgt,
                                                              always=group_armies)):
                 print(line)
                 if ok:
