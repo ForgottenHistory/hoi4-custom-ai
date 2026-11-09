@@ -72,8 +72,16 @@ def friends_of(tag):
     return _tags(lines)
 
 
+def keep_in_group(gid, army_ids):
+    """Put back armies the game took out of the army group (it re-sorts armies into theatres by where they stand).
+    Returns the reply, or None if all were in."""
+    r = send(f"bridge.army assign {gid} " + " ".join(map(str, army_ids)))[0]
+    return r
+
+
 def build_structure(m, provinces, divs, tag, me, tgt, fast_units, friend_ids, cache):
-    """Build the armies, generals and the army group (hoi4ai/organize.py) with bridge.army. Returns a summary."""
+    """Build the armies, generals and the army group (hoi4ai/organize.py) with bridge.army.
+    Returns (summary lines, army group id or 0, the group's army ids)."""
     lead = leaders_mod.load(tag, os.path.join(cache, "leaders.tsv"))
     group, others, marshal = organize.plan(m, provinces.controller, divs, tag, me, tgt, fast_units, lead, friend_ids)
     lines, group_ids = [], []
@@ -94,6 +102,7 @@ def build_structure(m, provinces, divs, tag, me, tgt, fast_units, friend_ids, ca
         r = send("bridge.army group " + " ".join(map(str, group_ids)))[0]
         if r.startswith("OK"):
             gid = int(r.split()[3])
+            lines.append("  " + keep_in_group(gid, group_ids))
             fm = ""
             if marshal:
                 lr = send(f"bridge.army leader {gid} {marshal.id}")[0]
@@ -101,7 +110,10 @@ def build_structure(m, provinces, divs, tag, me, tgt, fast_units, friend_ids, ca
             lines.append(f"army group {gid} of {len(group_ids)} armies{fm}")
         else:
             lines.append("army group: " + r)
-    return lines
+            gid = 0
+    else:
+        gid = 0
+    return lines, gid, group_ids
 
 
 def enemies_of(tag):
@@ -166,9 +178,13 @@ def main():
     if a.organize and not a.dry_run:
         provinces.refresh()
         friend_ids0 = [ids[t] for t in friends_of(tag) if t in ids]
-        for line in build_structure(m, provinces, snap.take(), tag, me, tgt, fast_units, friend_ids0,
-                                    os.path.join(REPO, ".cache")):
+        lines, group_id, group_armies = build_structure(m, provinces, snap.take(), tag, me, tgt, fast_units,
+                                                        friend_ids0, os.path.join(REPO, ".cache"))
+        for line in lines:
             print("  " + line)
+    else:
+        group_id, group_armies = 0, []
+    ticks = 0
     protected = set()
     war_start = None
     last = None
@@ -186,6 +202,11 @@ def main():
                 continue
             last = now
             t0 = time.time()
+            ticks += 1
+            if group_id and ticks % 6 == 0:
+                r = keep_in_group(group_id, group_armies)
+                if not r.startswith(f"OK {len(group_armies)} of"):
+                    print("army group:", r)
             provinces.refresh()
             divs = snap.take()
             enemy_tags = enemies_of(tag)
