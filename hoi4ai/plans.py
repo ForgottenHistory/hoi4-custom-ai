@@ -86,7 +86,7 @@ def sections(proc, me, target, ctrl, max_misses=40):
     return out
 
 
-def make(m, armies, secs, vps, ctrl, target, near=4, reach=3):
+def make(m, armies, secs, vps, ctrl, target, near=4, reach=3, always=()):
     """armies: {army id: [divisions]}; secs: [Section]; vps: {province: victory points} of the target.
     Returns [(army id, front id, start, end, target province, [division ids])]: each army on the section nearest
     to it, armies along a section in the order they stand, each with a stretch as long as its share; its offensive
@@ -96,7 +96,8 @@ def make(m, armies, secs, vps, ctrl, target, near=4, reach=3):
     def d2(p, xy):
         return (pv[p].x - xy[0]) ** 2 + (pv[p].y - xy[1]) ** 2
 
-    # how far each province is from the border (armies far from it, e.g. a garrison elsewhere, get no plan)
+    # how far each province is from the border: an army mostly farther than REACH (a garrison elsewhere) gets none,
+    # unless it is in ALWAYS (the army group's)
     border = {p for sec in secs for p in sec.ours}
     away = {p: 0 for p in border}
     todo = collections.deque(border)
@@ -109,7 +110,7 @@ def make(m, armies, secs, vps, ctrl, target, near=4, reach=3):
                     todo.append(n)
     on = collections.defaultdict(list)
     for aid, ds in armies.items():
-        if not ds or sum(d.province in away for d in ds) < len(ds) / 2:
+        if not ds or (aid not in always and sum(d.province in away for d in ds) < len(ds) / 2):
             continue
         xy = (sum(pv[d.province].x for d in ds) / len(ds), sum(pv[d.province].y for d in ds) / len(ds))
         k = min(range(len(secs)), key=lambda j: min(d2(p, xy) for p in secs[j].ours))

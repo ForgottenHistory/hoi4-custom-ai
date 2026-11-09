@@ -261,7 +261,8 @@ def main():
                if provinces.controller[p] == tgt}
         if secs and vps:
             armies = {aid: [d for d in divs0 if d.owner == tag and d.army == aid] for aid in planning}
-            for aid, ok, line in plans.draw(plans.make(m, armies, secs, vps, provinces.controller, tgt)):
+            for aid, ok, line in plans.draw(plans.make(m, armies, secs, vps, provinces.controller, tgt,
+                                                             always=group_armies)):
                 print(line)
                 if ok:
                     planned.add(aid)
