@@ -288,7 +288,8 @@ def main():
         army_order = group_armies
     leader_day = None
     planned, executed, zone_specs = set(), False, []
-    drawn = {}  # army id -> (front, start, end, target): its plan, redrawn if the game drops it before the war
+    drawn = {}  # army id -> (front, start, end, target): its plan, redrawn if the game drops it
+    redrawn_day = {}  # army id -> the day its front line was last redrawn (in war: at most once a day)
     state_path = os.path.join(REPO, ".cache", "plans_state.json")
     if a.plans and group_armies and not a.dry_run and os.path.exists(state_path):
         # a restart: keep the plans the game holds (redrawing them would throw away the planning built up)
@@ -417,9 +418,10 @@ def main():
             at_war = target in enemy_tags
             if at_war and war_start is None:
                 war_start = now
-            if drawn and not at_war and not a.dry_run:
-                # the game sometimes drops an army's front line or offensive line on its own (no command does it):
-                # draw it again
+            if drawn and not a.dry_run:
+                # the game sometimes drops an army's front line or offensive line on its own (no command does it;
+                # two armies lost theirs when the war was declared): draw it again. In war only a lost front line
+                # (an offensive line can be finished), once a day per army
                 from hoi4ai.memory import Process
                 proc = Process()
                 lost, fixed = [], []
@@ -427,8 +429,11 @@ def main():
                     ds = [d.id for d in divs if d.owner == tag and d.army == aid]
                     have = plans.arrows(proc, aid)
                     if not have:
+                        if at_war and redrawn_day.get(aid) == now.date():
+                            continue
+                        redrawn_day[aid] = now.date()
                         lost.append((aid, *p, ds))
-                    elif not any(have.values()) and ds:
+                    elif not at_war and not any(have.values()) and ds:
                         r = send(f"bridge.plan arrow {aid} #{min(have)} {p[3]} " + " ".join(map(str, ds)))[0]
                         print(f"redrawn: army {aid}: offensive to {p[3]} on line {min(have)}: {r}")
                         fixed.append(aid)
