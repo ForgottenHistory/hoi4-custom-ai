@@ -219,7 +219,11 @@ class Planner:
         route = self.routes(start, enemy_land, foe_power)  # infantry's local attacks: the nearest objective
         # the main axis (fast army, infantry reserves): the most valuable province of the enemy's main body
         goal = max((p for p in vps if p in body), key=vps.get, default=None)
-        fast_route = self.fast_routes({p: v for p, v in vps.items() if p in body}, enemy_land, foe_power)
+        # the fast army goes for points behind the enemy's line; those at the line are the infantry's
+        at_line = {q for p in front for q in facing[p] if ctrl[q] == target}
+        depth = self.bfs(at_line, target_land) if at_line else {}
+        deep = {p: v for p, v in vps.items() if p in body and depth.get(p, 9) >= 2}
+        fast_route = self.fast_routes(deep or {p: v for p, v in vps.items() if p in body}, enemy_land, foe_power)
 
         def route_from(p, r=route):
             """Best route cost to an objective starting with an attack out of our province P."""
@@ -234,7 +238,7 @@ class Planner:
 
         for p in list(self.points):
             kind, left = self.points[p]
-            if left <= 1 or p not in main or (at_war and kind == "fast"):  # at war the fast point follows openings
+            if left <= 1 or p not in main:
                 del self.points[p]
             else:
                 self.points[p] = (kind, left - 1)
@@ -276,25 +280,29 @@ class Planner:
                 reserves = n_line - len(fr)
             if not score:
                 continue
-            # the fast army: one sector, at the start of the best route into the enemy's main body
+            # the fast army: one sector, at the start of the best route into the enemy's main body. At war, where
+            # we border empty land of it if we do (the breach: tanks go through and on, the infantry follows)
+            breach = {p: v for p, v in fscore.items()
+                      if any(q in body and foe_power[q] == 0 for q in facing[p])} if at_war else {}
+            fcand = breach or fscore
             fpts = [p for p, (k, _) in self.points.items() if k == "fast" and comp.get(p) == c]
             for b in fpts:  # drop a point that is no longer near the best route
-                if b not in fscore or fscore[b] > min(fscore.values()) * s.support_route:
+                if b not in fcand or fcand[b] > min(fcand.values()) * s.support_route:
                     del self.points[b]
             fpts = [b for b in fpts if b in self.points]
-            if n_fast and not fpts and fscore:
+            if n_fast and not fpts and fcand:
                 # near-equal routes: the one that splits the enemy's army most evenly
-                low = min(fscore.values())
-                near = [p for p, v in fscore.items() if v <= low * s.axis_tie]
-                best = max(near, key=lambda p: (self.split(p, goal, foe_power, target_land), -fscore[p]))
+                low = min(fcand.values())
+                near = [p for p, v in fcand.items() if v <= low * s.axis_tie]
+                best = max(near, key=lambda p: (self.split(p, goal, foe_power, target_land), -fcand[p]))
                 self.points[best] = ("fast", s.keep)
                 fpts = [best]
             used = set()
             load = dict(line_demand)  # holders already stand there
             for b in fpts:
-                placed = self.place(b, math.ceil(n_fast / len(fpts)), fscore, own, load, fast_demand, body_front)
+                placed = self.place(b, math.ceil(n_fast / len(fpts)), fcand, own, load, fast_demand, body_front)
                 sectors[b] = ("fast", placed)
-                used.update(self.sector(b, fscore))
+                used.update(self.sector(b, fcand))
             # infantry support points: along the next best routes of the main axis, apart from each other and
             # from the fast sector
             score = fscore or score
@@ -320,7 +328,7 @@ class Planner:
             if fpts and behind:
                 per = math.ceil(behind / len(fpts))
                 for b in fpts:
-                    placed = self.place(b, per, fscore, own, load, line_demand, body_front)
+                    placed = self.place(b, per, fcand, own, load, line_demand, body_front)
                     sectors[b] = ("fast", sorted(set(sectors[b][1]) | set(placed)))
             if spts and reserves - behind:
                 per = math.ceil((reserves - behind) / len(spts))
