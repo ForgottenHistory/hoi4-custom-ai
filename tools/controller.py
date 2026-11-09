@@ -72,11 +72,26 @@ def friends_of(tag):
     return _tags(lines)
 
 
+def _object_address(type_, oid):
+    m = re.search(r"@0x([0-9a-fA-F]+)", send(f"bridge.object {type_} {oid}")[0])
+    return int(m.group(1), 16) if m else 0
+
+
+def _pointer_at(addr):
+    r = send(f"bridge.mem {addr:x} 8")[0]
+    if not r.startswith("OK"):
+        return 0
+    return int.from_bytes(bytes.fromhex(r[3:].strip().replace("?", "0")), "little")
+
+
 def keep_in_group(gid, army_ids):
-    """Put back armies the game took out of the army group (it re-sorts armies into theatres by where they stand).
-    Returns the reply, or None if all were in."""
-    r = send(f"bridge.army assign {gid} " + " ".join(map(str, army_ids)))[0]
-    return r
+    """Put back armies that are no longer in the army group (an army's group is at +0x1b8). Only the missing ones:
+    assigning an army that is already in the group makes the game re-order it. Returns the reply, or None."""
+    group = _object_address(53, gid)
+    missing = [a for a in army_ids if _pointer_at(_object_address(53, a) + 0x1b8) != group]
+    if not group or not missing:
+        return None
+    return send(f"bridge.army assign {gid} " + " ".join(map(str, missing)))[0]
 
 
 def build_structure(m, provinces, divs, tag, me, tgt, fast_units, friend_ids, cache):
@@ -102,7 +117,7 @@ def build_structure(m, provinces, divs, tag, me, tgt, fast_units, friend_ids, ca
         r = send("bridge.army group " + " ".join(map(str, group_ids)))[0]
         if r.startswith("OK"):
             gid = int(r.split()[3])
-            lines.append("  " + keep_in_group(gid, group_ids))
+            lines.append("  " + (keep_in_group(gid, group_ids) or f"all {len(group_ids)} armies in the group"))
             fm = ""
             if marshal:
                 lr = send(f"bridge.army leader {gid} {marshal.id}")[0]
@@ -155,6 +170,8 @@ def main():
     ap.add_argument("--once", action="store_true", help="one planning step, then stop")
     ap.add_argument("--organize", action="store_true",
                     help="build the army structure first: a fast army, infantry armies, an army group with a field marshal")
+    ap.add_argument("--group", type=int, nargs="+", metavar=("GROUP", "ARMY"),
+                    help="keep these armies in this army group (when not using --organize, e.g. after a restart)")
     ap.add_argument("--armies", action="store_true",
                     help="let the game form armies and pick generals (their buffs); fronts and plans stay blocked")
     ap.add_argument("--no-takeover", action="store_true", help="don't block the game AI's army commands")
@@ -182,6 +199,8 @@ def main():
                                                         friend_ids0, os.path.join(REPO, ".cache"))
         for line in lines:
             print("  " + line)
+    elif a.group and len(a.group) > 1:
+        group_id, group_armies = a.group[0], a.group[1:]
     else:
         group_id, group_armies = 0, []
     ticks = 0
@@ -205,8 +224,8 @@ def main():
             ticks += 1
             if group_id:
                 r = keep_in_group(group_id, group_armies)
-                if not r.startswith(f"OK {len(group_armies)} of"):
-                    print("army group:", r)
+                if r:
+                    print("army group, put back:", r)
             provinces.refresh()
             divs = snap.take()
             enemy_tags = enemies_of(tag)
