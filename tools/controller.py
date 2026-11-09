@@ -19,7 +19,7 @@ import time
 
 import _bridge  # noqa: F401
 from hoi4bridge import BridgeError, BridgeUnavailable, query, send, trigger
-from hoi4ai import leaders as leaders_mod, mapdata, organize, units
+from hoi4ai import leaders as leaders_mod, mapdata, organize, plans, units
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.front import Planner
 from hoi4ai.live import Provinces
@@ -205,6 +205,9 @@ def main():
                     help="build the army structure first: a fast army, infantry armies, an army group with a field marshal")
     ap.add_argument("--group", type=int, nargs="+", metavar=("GROUP", "ARMY"),
                     help="keep these armies in this army group (when not using --organize, e.g. after a restart)")
+    ap.add_argument("--plans", action="store_true",
+                    help="infantry armies of the army group get battle plans (front line + offensive line, executed "
+                         "at war; they build up the planning bonus); the controller then only moves the other divisions")
     ap.add_argument("--armies", action="store_true",
                     help="let the game form armies and pick generals (their buffs); fronts and plans stay blocked")
     ap.add_argument("--no-takeover", action="store_true", help="don't block the game AI's army commands")
@@ -242,6 +245,23 @@ def main():
     if a.group and not a.organize:
         army_order = group_armies
     leader_day = None
+    planned, executed = set(), False
+    if a.plans and len(group_armies) > 1 and not a.dry_run:
+        from hoi4ai.memory import Process
+        provinces.refresh()
+        infantry = group_armies[1:]  # the first army of the group is the fast army
+        divs0 = snap.take()
+        border = plans.fronts(Process(), me, tgt, provinces.controller, m)
+        vps = {p: v for st in m.states.values() for p, v in st.victory_points.items()
+               if provinces.controller[p] == tgt}
+        if border and vps:
+            armies = {aid: [d for d in divs0 if d.owner == tag and d.army == aid] for aid in infantry}
+            for line in plans.draw(plans.make(m, armies, border, vps)):
+                print(line)
+                if "front" in line and "OK front line" in line:
+                    planned.add(int(line.split()[1].rstrip(":")))
+        else:
+            print("battle plans: no border with", target, "found" if not border else "", "or no victory points")
     ticks = 0
     can_stop = send("bridge.stop")[0].startswith("FAIL usage: bridge.stop")
     print("stopping attacks with", "bridge.stop" if can_stop else "a move back to the division's own province")
@@ -279,7 +299,14 @@ def main():
             at_war = target in enemy_tags
             if at_war and war_start is None:
                 war_start = now
-            orders, rep = planner.plan(provinces.controller, divs, tag, enemy_ids, tgt, at_war, friend_ids)
+            if planned and at_war and not executed:
+                for line in plans.execute(sorted(planned)):
+                    print(line)
+                executed = True
+            # divisions of armies on a battle plan are the game's to move
+            orders, rep = planner.plan(provinces.controller,
+                                       [d for d in divs if not (d.owner == tag and d.army in planned)],
+                                       tag, enemy_ids, tgt, at_war, friend_ids)
             mine = {d.id: d for d in divs if d.owner == tag}
             if membership and not a.dry_run:  # divisions that drifted out of their army go back
                 strays = collections.defaultdict(list)
