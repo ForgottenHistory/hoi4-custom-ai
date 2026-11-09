@@ -28,6 +28,7 @@ all the way; the AI tried to cancel it 103 times and to build German armies 1526
 | script | does |
 |---|---|
 | `tools/controller.py --tag GER --target POL` | run the country's army with our planner (below); logs to `recordings/controller_*` (`--dry-run --once` to just see a plan) |
+| `tools/heatmap.py [--tag GER --target POL]` | one planning step on the live game (sends nothing), drawn as a PNG: breakthrough and attack scores, sectors, our divisions and enemy strength per province (`recordings/heatmaps/`) |
 | `tools/mapcheck.py [PROVINCE ..]` | build the map (through the active mods), print a province's neighbours, check it against the running game and count who controls what |
 | `tools/takeover.py TAG` / `--release TAG` | take a country's land army from the AI (or give it back) |
 | `tools/cmdrec.py [--dir FOLDER] [--tag TAG]` | record every command the game executes, with the in-game date, and a daily snapshot of every division; Ctrl+C stops |
@@ -52,8 +53,10 @@ and live data from the running game's memory.
   name.
 - `divisions.py`: every division (owner, province, destination, organisation, strength, template) via `bridge.snap`.
 - `front.py`: the planner. Each connected piece of the territory we may stand on (our own, subjects', allies',
-  military access) holds every province facing the enemy with one division. Its reserves mass at a few
-  breakthrough points facing weak, open, valuable enemy provinces, toward the enemy's top victory point.
+  faction members) holds every province facing the enemy with one division. Its reserves mass at a few
+  breakthrough points facing weak, open, valuable enemy provinces, toward the enemy's top victory point; each
+  breakthrough force spreads over a sector (the point and its two best neighbours on the front), so it can
+  attack from several sides.
   Once at war, it attacks wherever the divisions next to an enemy province outweigh its defenders (organisation
   x strength x terrain), keeps one division home where the province faces other enemy divisions, and pulls
   back attackers whose organisation runs out.

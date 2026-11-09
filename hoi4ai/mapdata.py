@@ -170,6 +170,28 @@ def _cache_key(files, paths):
     return h.hexdigest()[:16]
 
 
+def _id_image(img, colour):
+    keys = np.array(sorted(colour), dtype=np.int64)
+    vals = np.array([colour[k] for k in keys.tolist()], dtype=np.int32)
+    idx = np.searchsorted(keys, img.ravel()).clip(0, len(keys) - 1)
+    known = keys[idx] == img.ravel()
+    return np.where(known, vals[idx], 0).reshape(img.shape), vals
+
+
+def province_image(m):
+    """(H, W) int32 array: the province id of each pixel of provinces.bmp (top row first). Cached."""
+    st = os.stat(m.sources["provinces"])
+    key = hashlib.sha1(("%s|%d|%d" % (m.sources["provinces"], st.st_size, st.st_mtime_ns)).encode()).hexdigest()[:16]
+    path = os.path.join(CACHE_DIR, "ids_%s.npy" % key)
+    if os.path.exists(path):
+        return np.load(path)
+    _, colour = _read_definitions(m.sources["definitions"])
+    ids, _ = _id_image(_read_bmp(m.sources["provinces"]), colour)
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    np.save(path, ids)
+    return ids
+
+
 def load(files=None, use_cache=True, verbose=False):
     files = files or GameFiles()
     src = _read_default_map(files)
@@ -190,11 +212,7 @@ def load(files=None, use_cache=True, verbose=False):
     m.provinces, colour = _read_definitions(src["definitions"])
     img = _read_bmp(src["provinces"])
     m.height, m.width = img.shape
-    keys = np.array(sorted(colour), dtype=np.int64)
-    vals = np.array([colour[k] for k in keys.tolist()], dtype=np.int32)
-    idx = np.searchsorted(keys, img.ravel()).clip(0, len(keys) - 1)
-    known = keys[idx] == img.ravel()
-    ids = np.where(known, vals[idx], 0).reshape(img.shape)
+    ids, vals = _id_image(img, colour)
 
     # centroids (x right, y down from the top of provinces.bmp)
     flat = ids.ravel()

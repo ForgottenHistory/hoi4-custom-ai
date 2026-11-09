@@ -60,10 +60,11 @@ def _tags(lines):
 
 
 def friends_of(tag):
-    """Countries whose land our divisions can use: subjects, overlord, faction members, military access."""
+    """Countries whose land our front runs along: subjects, overlord, faction members. (Not mere military
+    access: a neutral's border is not ours to hold or attack from.)"""
     lines = query(f'{tag} = {{ every_other_country = {{ limit = {{ OR = {{ is_subject_of = {tag} '
-                  f'{tag} = {{ is_subject_of = PREV }} is_in_faction_with = {tag} '
-                  f'{tag} = {{ has_military_access_to = PREV }} }} }} log = "[THIS.GetFlag]" }} }}')
+                  f'{tag} = {{ is_subject_of = PREV }} is_in_faction_with = {tag} }} }} '
+                  f'log = "[THIS.GetFlag]" }} }}')
     return _tags(lines)
 
 
@@ -86,6 +87,7 @@ class Log:
             self.ticks.write("\t".join(self._cols) + "\n")
         self.ticks.write("\t".join(str(row.get(c, "")) for c in self._cols) + "\n")
         self.ticks.flush()
+        self.moves.flush()
 
     def move(self, when, d, to, kind, result):
         self.moves.write(f"{when}\t{d.id}\t{d.province}\t{to}\t{kind}\t{result}\n")

@@ -26,6 +26,7 @@ class Settings:
     retreat_org = 0.20         # attackers below this share are pulled back
     breakthrough_every = 6     # one breakthrough point per this many reserve divisions
     breakthrough_keep = 8      # ticks a breakthrough point is kept while it stays on the front
+    sector_size = 3            # front provinces a breakthrough force spreads over (the point and its best neighbours)
     max_breakthroughs = 6
 
 
@@ -36,6 +37,7 @@ class Planner:
         self.best_org = {}          # division id -> highest org seen
         self.hold = {}              # division id -> province it holds / stages at
         self.breakthroughs = {}     # province -> ticks left
+        self.sectors = {}           # breakthrough province -> the front provinces its force spreads over
         self.tick = 0
         self._land_nb = {p: [n for n in nb if m.is_land(n)] for p, nb in m.neighbours.items() if m.is_land(p)}
 
@@ -54,6 +56,11 @@ class Planner:
                     q.append(n)
         return dist
 
+    def sector(self, b, score):
+        """B and its best-scoring neighbours on the same front (SCORE holds that front's provinces)."""
+        nbs = sorted((n for n in self.nb(b) if n in score), key=score.get, reverse=True)
+        return [b] + nbs[:self.s.sector_size - 1]
+
     def org_share(self, d):
         best = max(self.best_org.get(d.id, 0), d.org)
         self.best_org[d.id] = best
@@ -67,6 +74,7 @@ class Planner:
         (orders {div id: province}, report dict)."""
         self.tick += 1
         m, s = self.m, self.s
+        self.sectors = {}
         hostile = set(enemies) | ({target} if target else set())
         land = self._land_nb
         ours = {self.me} | set(friends)
@@ -127,19 +135,37 @@ class Planner:
             reserves = n - len(fr)
             mine_bt = [b for b in self.breakthroughs if comp.get(b) == c]
             want = min(s.max_breakthroughs, max(1 if mainc else 0, reserves // s.breakthrough_every))
+            score = {p: sum(value(t) / ((foe_power[t] + 0.5) * cost(t)) for t in facing[p] if ctrl[t] == target)
+                     for p in mainc}
+            used = {q for b in mine_bt for q in self.sector(b, score)}
             if len(mine_bt) < want:
-                score = {p: sum(value(t) / ((foe_power[t] + 0.5) * cost(t)) for t in facing[p] if ctrl[t] == target)
-                         for p in mainc if p not in self.breakthroughs}
                 for p in sorted(score, key=score.get, reverse=True):
                     if len(mine_bt) >= want:
                         break
-                    if all(p not in self.nb(b) for b in mine_bt):  # spread them out a little
+                    sec = self.sector(p, score)
+                    if p not in self.breakthroughs and not any(q in used or any(n in used for n in self.nb(q))
+                                                               for q in sec):
                         self.breakthroughs[p] = s.breakthrough_keep
                         mine_bt.append(p)
+                        used.update(sec)
             if mine_bt and reserves:
+                # each breakthrough force spreads over its sector, so it can attack from several sides
                 per = math.ceil(reserves / len(mine_bt))
-                for p in mine_bt:
-                    demand[p] += per
+                for b in mine_bt:
+                    sec = self.sector(b, score)
+                    for i, q in enumerate(sec):
+                        demand[q] += per // len(sec) + (1 if i < per % len(sec) else 0)
+            self.sectors.update({b: self.sector(b, score) for b in mine_bt})
+
+        # what the plan saw, for tools/heatmap.py
+        self.view = dict(
+            front=front, main=main, demand=demand, breakthroughs=set(self.breakthroughs), sectors=dict(self.sectors), goal=goal,
+            foe_power=dict(foe_power), component=comp,
+            bt_score={p: sum(value(t) / ((foe_power[t] + 0.5) * cost(t)) for t in facing[p] if ctrl[t] == target)
+                      for p in main},
+            attack_score={t: value(t) / (foe_power[t] * cost(t) + 0.2)
+                          for p in main for t in facing[p] if ctrl[t] == target},
+            value={t: value(t) for p in main for t in facing[p] if ctrl[t] == target})
 
         # --- attacks (at war with the target): from where our divisions stand now -----------------------------
         orders, attacking = {}, set()
