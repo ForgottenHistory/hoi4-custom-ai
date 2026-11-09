@@ -288,6 +288,7 @@ def main():
         army_order = group_armies
     leader_day = None
     planned, executed, zone_specs = set(), False, []
+    drawn = {}  # army id -> (front, start, end, target): its plan, redrawn if the game drops it before the war
     state_path = os.path.join(REPO, ".cache", "plans_state.json")
     if a.plans and group_armies and not a.dry_run and os.path.exists(state_path):
         # a restart: keep the plans the game holds (redrawing them would throw away the planning built up)
@@ -297,8 +298,12 @@ def main():
         # every army still holds its lines before the war; once fighting, the game uses lines up and splits them,
         # so any line left is enough (redrawing would throw away the planning)
         held = [bool(plans.lines(proc, aid)) for aid in st["planned"]]
-        if st.get("group") == group_armies and (all(held) or (any(held) and target in enemies_of(tag))):
+        # (with each army's plan saved, a missing one is simply drawn again below)
+        if st.get("group") == group_armies and (all(held) or (any(held) and (target in enemies_of(tag)
+                                                                             or st.get("drawn")))):
             planned = set(st["planned"])
+            drawn = {int(k): tuple(tuple(x) if isinstance(x, list) else x for x in v)
+                     for k, v in st.get("drawn", {}).items()}
             zone_specs = [(aid, {int(k): v for k, v in b.items()}, lo, hi) for aid, b, lo, hi in st["specs"]]
             # the same border dict for armies on the same border (zones() groups by it)
             same = {}
@@ -356,10 +361,11 @@ def main():
                     print(line)
                     if ok:
                         planned.add(aid)
+                drawn.update({aid: (front, start, end, t) for aid, front, start, end, t, _ in laid if aid in planned})
             if not a.execute:  # the game keeps the plans (planning builds) but leaves the moving to us
                 for line in plans.cohesion(sorted(planned)):
                     print(line)
-            json.dump({"group": group_armies, "planned": sorted(planned),
+            json.dump({"group": group_armies, "planned": sorted(planned), "drawn": {str(k): v for k, v in drawn.items()},
                        "specs": [(aid, {str(k): v for k, v in b.items()}, lo, hi) for aid, b, lo, hi in zone_specs]},
                       open(state_path, "w", encoding="utf-8"))
         else:
@@ -411,6 +417,17 @@ def main():
             at_war = target in enemy_tags
             if at_war and war_start is None:
                 war_start = now
+            if drawn and not at_war and not a.dry_run:
+                # the game sometimes drops an army's front line on its own (no command does it): draw it again
+                from hoi4ai.memory import Process
+                proc = Process()
+                lost = [(aid, *p, [d.id for d in divs if d.owner == tag and d.army == aid])
+                        for aid, p in sorted(drawn.items()) if not plans.lines(proc, aid)]
+                for aid, ok, line in plans.draw(proc, lost):
+                    print("redrawn:", line)
+                if lost and not a.execute:
+                    for line in plans.cohesion([x[0] for x in lost]):
+                        print(line)
             if planned and a.execute and at_war and not executed:
                 for line in plans.execute(sorted(planned)):
                     print(line)
