@@ -23,7 +23,7 @@ def main():
     ap.add_argument("tag", nargs="?", default="GER")
     ap.add_argument("--json")
     a = ap.parse_args()
-    divs = Snapshotter(os.path.join(REPO, "recordings", "templates_snap.tsv")).take()
+    divs = Snapshotter(os.path.join(REPO, ".cache", "templates_snap.tsv")).take()
     out = templates.country(a.tag, divs, Process())
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
