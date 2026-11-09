@@ -11,8 +11,9 @@ Leaders with role 0 but no flag (Mackensen, Blomberg, Mueller in 1939, which the
 an army group's leader: its "remove leader" routine unassigns them within hours).
 """
 import os
+import re
 
-from hoi4bridge import send
+from hoi4bridge import send, trigger
 
 FIELDS = "c120 ie7c if58 if68 if78 if88 bde8 s40 s20"
 GENERAL = 1
@@ -57,4 +58,67 @@ def load(tag, path):
                                   p[8], p[9]))
             except ValueError:
                 continue
+    return out
+
+
+def _children(text, lo, hi):
+    """The KEY = { ... } blocks directly inside TEXT[lo:hi]: [(key, start, end)] (start/end inside the braces)."""
+    out, i = [], lo
+    pat = re.compile(r"([\w.:@-]+)\s*=\s*\{")
+    while True:
+        mt = pat.search(text, i, hi)
+        if not mt:
+            return out
+        depth, j = 1, mt.end()
+        while j < hi and depth:
+            depth += {"{": 1, "}": -1}.get(text[j], 0)
+            j += 1
+        out.append((mt.group(1), mt.end(), j - 1))
+        i = j
+
+
+_CONDITIONS = None
+
+
+def conditions(files=None):
+    """{character key: {role: [condition text]}} for the corps_commander and field_marshal roles of every character
+    (common/characters, through the active mods): the role's visible and available blocks."""
+    global _CONDITIONS
+    if _CONDITIONS is not None:
+        return _CONDITIONS
+    from .gamefiles import GameFiles
+    files = files or GameFiles()
+    out = {}
+    for path in files.listdir("common/characters", ".txt").values():
+        text = re.sub(r"#[^\n]*", "", open(path, encoding="utf-8-sig", errors="replace").read())
+        for top, a, b in _children(text, 0, len(text)):
+            if top != "characters":
+                continue
+            for key, c, d in _children(text, a, b):
+                for role, e, f in _children(text, c, d):
+                    if role in ("corps_commander", "field_marshal"):
+                        out.setdefault(key, {})[role] = [text[g:h] for k, g, h in _children(text, e, f)
+                                                         if k in ("visible", "available")]
+    _CONDITIONS = out
+    return out
+
+
+def usable(tag, leaders, files=None):
+    """The LEADERS the game lets command now: each role's visible / available conditions, checked by the game in
+    the country's scope (a generals list shows only these; the game unassigns the others within a day)."""
+    conds = conditions(files)
+    out = []
+    for l in leaders:
+        role = "field_marshal" if l.field_marshal else "corps_commander"
+        blocks = conds.get(l.key, {}).get(role, [])
+        ok = True
+        for b in blocks:
+            try:
+                if not trigger(f"{tag} = {{ {' '.join(b.split())} }}"):  # one line: the bridge reads lines
+                    ok = False
+                    break
+            except Exception:
+                pass  # a condition the game can't check here: don't rule the leader out for it
+        if ok:
+            out.append(l)
     return out

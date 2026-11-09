@@ -98,15 +98,18 @@ def keep_in_group(gid, army_ids):
     return send(f"bridge.army assign {gid} " + " ".join(map(str, missing)))[0]
 
 
-def keep_leaders(tag, gid, army_ids, cache):
+def keep_leaders(tag, gid, army_ids, cache, other_armies=()):
     """Every army keeps a general and the army group a field marshal. Nobody is a field marshal at the start; the game
     promotes some later (in 1939 Rundstedt, Kluge, Kesselring), which takes them out of their armies. So: a promoted
     field marshal gets the army group, an army without a general (or led by a field marshal) gets the best free one.
-    ARMY_IDS in priority order (the fast army first). Returns lines describing what changed."""
+    ARMY_IDS in priority order (the fast army first); OTHER_ARMIES keep their generals (theirs aren't free). Only
+    leaders the game lets command now are chosen (leaders.usable). Returns lines describing what changed."""
     lead = leaders_mod.load(tag, os.path.join(cache, "leaders.tsv"))
     by_addr = {_object_address(4713, l.id): l for l in lead}
     current = {a: by_addr.get(_pointer_at(_object_address(53, a) + 0x88)) for a in army_ids}
     used = {l.id for l in current.values() if l}
+    used |= {l.id for l in (by_addr.get(_pointer_at(_object_address(53, a) + 0x88)) for a in other_armies) if l}
+    lead = leaders_mod.usable(tag, lead)
     free = sorted((l for l in lead if not l.field_marshal and l.id not in used), key=lambda l: (-l.attack, -l.planning))
     lines = []
     for a in army_ids:
@@ -132,7 +135,7 @@ def keep_leaders(tag, gid, army_ids, cache):
 def build_structure(m, provinces, divs, tag, me, tgt, fast_units, friend_ids, cache):
     """Build the armies, generals and the army group (hoi4ai/organize.py) with bridge.army.
     Returns (summary lines, army group id or 0, the group's army ids, {division id: army id})."""
-    lead = leaders_mod.load(tag, os.path.join(cache, "leaders.tsv"))
+    lead = leaders_mod.usable(tag, leaders_mod.load(tag, os.path.join(cache, "leaders.tsv")))
     from hoi4ai.memory import Process
     secs = plans.sections(Process(), me, tgt, provinces.controller)
     own = {p for p in m.provinces if m.is_land(p) and provinces.controller[p] in {me, *friend_ids}}
@@ -362,6 +365,7 @@ def main():
     can_rail = send("bridge.rail")[0].startswith("FAIL usage: bridge.rail")
     print("stopping attacks with", "bridge.stop" if can_stop else "a move back to the division's own province")
     protected = set()
+    railing = {}  # division id -> [rail target, last province seen, steps without moving]: on a train, left alone
     war_start = None
     last = None
     print(f"running {tag} against {target}, a plan every {a.hours} in-game hours; logs in {log.folder}")
@@ -383,10 +387,6 @@ def main():
                 r = keep_in_group(group_id, group_armies)
                 if r:
                     print("army group, put back:", r)
-            if army_order and not a.dry_run and now.date() != leader_day:  # once a day: generals and field marshal
-                leader_day = now.date()
-                for line in keep_leaders(tag, group_id, army_order, os.path.join(REPO, ".cache")):
-                    print(line)
             try:
                 provinces.refresh()
                 divs = snap.take()
@@ -395,6 +395,12 @@ def main():
                 last = None
                 time.sleep(1)
                 continue
+            if army_order and not a.dry_run and now.date() != leader_day:  # once a day: generals and field marshal
+                leader_day = now.date()
+                # every army of ours: the group's first (the fast one first), then the others (garrisons, exclaves)
+                others = sorted({d.army for d in divs if d.owner == tag and d.army} - set(army_order) - {group_id})
+                for line in keep_leaders(tag, group_id, list(army_order) + others, os.path.join(REPO, ".cache")):
+                    print(line)
             enemy_tags = enemies_of(tag)
             enemy_ids = [ids[t] for t in enemy_tags if t in ids]
             friend_ids = [ids[t] for t in friends_of(tag) if t in ids]
@@ -427,10 +433,21 @@ def main():
                 protected.update(new)
             sent = failed = 0
             cmds, batch = [], []
+            for did, r in list(railing.items()):  # trains: arrived, stuck (no progress for 2 steps) or the war began
+                d = mine.get(did)
+                if d is None or d.province == r[0] or at_war:
+                    del railing[did]
+                    continue
+                r[2] = r[2] + 1 if d.province == r[1] else 0
+                r[1] = d.province
+                if r[2] >= 2:
+                    del railing[did]
             for did, prov in orders.items():
                 d = mine.get(did)
                 if d is None or d.dest == prov or (d.province == prov and not d.moving):
                     continue
+                if did in railing and railing[did][0] == prov:
+                    continue  # on its way by train: a new order would take it off the train
                 kind = "attack" if provinces.controller[prov] in set(enemy_ids) else "post"
                 pa, pb = m.provinces.get(d.province), m.provinces[prov]
                 if (can_rail and not at_war and kind == "post" and pa is not None
@@ -447,6 +464,8 @@ def main():
                         if kind == "rail" and not r.startswith("OK"):  # no rail route: march
                             kind, r = "post", send(f"bridge.move {d.id} {prov}")[0]
                         ok = r.startswith("OK")
+                        if ok and kind == "rail":
+                            railing[d.id] = [prov, d.province, 0]
                         sent += ok
                         failed += not ok
                         log.move(now, d, prov, kind, "ok" if ok else r)
