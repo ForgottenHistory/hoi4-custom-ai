@@ -262,8 +262,9 @@ def main():
     me, tgt = ids[tag], ids[target]
     provinces = Provinces()
     snap = Snapshotter(os.path.join(REPO, ".cache", "controller_snap.tsv"))
-    fast_units = {n for n, u in units.load().items() if u.fast}
-    planner = Planner(m, me, fast_units)
+    unit_types = units.load()
+    fast_units = {n for n, u in unit_types.items() if u.fast}
+    planner = Planner(m, me, fast_units, armored_units={n for n, u in unit_types.items() if u.armored})
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     log = Log(os.path.join(REPO, "recordings", f"controller_{tag}_{stamp}"))
     if not a.no_takeover and not a.dry_run:

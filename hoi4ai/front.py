@@ -43,6 +43,8 @@ def power(d):
 class Settings:
     attack_margin = 1.6        # infantry attacks when its power >= margin x enemy power x terrain cost
     fast_margin = 1.1          # the same for the fast army
+    armor_factor = 1.8         # an armoured division (main unit in the armor group) counts this much more when it
+                               # attacks: its armour against defenders with little piercing (1939 infantry)
     attack_min_org = 0.55      # share of a division's best organisation it needs to attack
     fast_min_org = 0.40
     stop_org = 0.30            # an attacker below this share of its best organisation stops attacking
@@ -65,9 +67,10 @@ class Settings:
 
 
 class Planner:
-    def __init__(self, m, me, fast_units=(), settings=None):
+    def __init__(self, m, me, fast_units=(), settings=None, armored_units=()):
         self.m, self.me = m, me
         self.fast_units = set(fast_units)
+        self.armored_units = set(armored_units)
         self.s = settings or Settings()
         self.best_org = {}          # division id -> highest org seen
         self.template_org = {}      # template name -> highest org seen on any division of it
@@ -108,6 +111,10 @@ class Planner:
                 break
             p = min((n for n in self.nb(p) if n in dist and dist[n] < dist[p]), key=dist.get)
         return p
+
+    def attack_power(self, d):
+        """A division's power as an attacker: armour counts extra (armor_factor)."""
+        return power(d) * (self.s.armor_factor if getattr(d, "unit", None) in self.armored_units else 1.0)
 
     def is_fast(self, d):
         return getattr(d, "unit", None) in self.fast_units
@@ -377,7 +384,10 @@ class Planner:
         if at_war and target in enemies:
             here = collections.defaultdict(list)
             for d in mine:
-                if not d.moving and d.province in land and ctrl[d.province] in ours:
+                # free to attack: standing, or only repositioning on our land (a division forever walking to its
+                # post would never attack); one already attacking or driving into enemy land is left to it
+                busy = d.moving and d.dest in land and ctrl[d.dest] in hostile
+                if not busy and d.province in land and ctrl[d.province] in ours:
                     here[d.province].append(d)
 
             under_way = collections.defaultdict(list)  # attacks already sent, by target
@@ -387,7 +397,7 @@ class Planner:
 
             def attack(targets, eligible, margin, min_org, keep_home, label, cap):
                 for t in targets:
-                    already = sum(power(d) for d in under_way[t])
+                    already = sum(self.attack_power(d) for d in under_way[t])
                     room = cap - len(under_way[t])
                     if room <= 0:
                         continue
@@ -395,10 +405,10 @@ class Planner:
                     for p in self.nb(t):
                         staying = [d for d in here.get(p, ()) if d.id not in attacking]
                         ready = sorted((d for d in staying if eligible(d) and self.can_attack(d, min_org)),
-                                       key=power, reverse=True)
+                                       key=self.attack_power, reverse=True)
                         exposed = keep_home and any(foe_power[q] > 0 for q in facing.get(p, ()) if q != t)
                         pool += ready[:max(0, len(staying) - 1)] if exposed else ready
-                    pool.sort(key=power, reverse=True)
+                    pool.sort(key=self.attack_power, reverse=True)
                     # attacked across the worst river among the provinces we attack from
                     rv = max((m.river(d.province, t) for d in pool), default=0)
                     need = foe_power[t] * self.terrain(t) * margin * RIVER_ATTACK[rv]
@@ -409,7 +419,7 @@ class Planner:
                         if (total > need and chosen) or len(chosen) >= room:
                             break
                         chosen.append(d)
-                        total += power(d)
+                        total += self.attack_power(d)
                     if chosen and total > need:
                         under_way[t] += chosen
                         for d in chosen:
@@ -470,7 +480,8 @@ class Planner:
                 on_target[d.dest].append(d)
         for t, ds in on_target.items():
             rv = max((m.river(d.province, t) for d in ds), default=0)
-            hopeless = foe_power[t] > 0 and sum(power(d) for d in ds) < foe_power[t] * self.terrain(t) * RIVER_ATTACK[rv]
+            hopeless = (foe_power[t] > 0 and sum(self.attack_power(d) for d in ds)
+                        < foe_power[t] * self.terrain(t) * RIVER_ATTACK[rv])
             for d in ds:
                 if hopeless or self.org_share(d) < s.stop_org:
                     self.stops.append(d)

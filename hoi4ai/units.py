@@ -16,6 +16,10 @@ class SubUnitType:
         self.speed_factor, self.categories = speed_factor, categories
 
     @property
+    def armored(self):
+        return self.group == "armor"
+
+    @property
     def fast(self):
         if self.group == "armor":
             return True
