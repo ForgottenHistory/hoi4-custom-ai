@@ -8,6 +8,7 @@ main and fallback lines, and draws a map: our land by how hard it is for the att
 the victory points.
 """
 import argparse
+import collections
 import os
 import sys
 
@@ -18,7 +19,7 @@ import _bridge  # noqa: F401
 from compare_runs import vp_names
 from controller import REPO, country_ids, friends_of, game_time
 from heatmap import COLD, OTHER, SEA, font, panel, ramp
-from hoi4ai import defence, mapdata, templates
+from hoi4ai import defence, defend, mapdata, templates
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.gamefiles import GameFiles
 from hoi4ai.live import Provinces
@@ -58,12 +59,16 @@ def main():
         """(average width, stats per width) of the divisions of TAGS_, from their templates."""
         rows = []
         for tg in tags_:
-            rows += templates.country(tg, [x for x in every if x.owner == tg], Process(), files).values()
+            for name, t in templates.country(tg, [x for x in every if x.owner == tg], Process(), files).items():
+                speeds[name] = t["maximum_speed"]
+                rows.append(t)
         n = sum(t["count"] for t in rows)
         w = sum(t["combat_width"] * t["count"] for t in rows)
         if not n or not w:
             return defence.DIVISION_WIDTH, None
         return w / n, {k: sum(t[k] * t["count"] for t in rows) / w for k in ("soft_attack", "defense", "breakthrough")}
+
+    speeds = {}
 
     width = foe_width = defence.DIVISION_WIDTH
     ours = theirs = None
@@ -82,6 +87,12 @@ def main():
     main_line, fallback = d.choose(lines, len(divs))
     floor = 1 - rules.surrender_limit
     names = vp_names(files)
+    # the defend mode's orders for this line: divisions per line province, the reserve and where it waits
+    df = defend.Defender(m, d, me, speeds)
+    df.line, df.fallback, df._planned_at = main_line, fallback, 0.0
+    orders, _ = df.plan(ctrl, owner, every, tag, attackers, False, foes, width, foe_width, hour=0.0)
+    posted = collections.Counter(orders.values())
+    points = set(df.view.get("points", ()))
     print(f"{tag} at {game_time(tag):%Y-%m-%d}: {len(divs)} divisions (average width {width:.0f}) against "
           f"{' '.join(attack_tags)} with {len(foes)} (width {foe_width:.0f}); surrender at {rules.surrender_limit:.0%} of victory points "
           f"lost, so keep over {floor:.0%} (+{d.s.buffer:.0%} buffer)")
@@ -133,14 +144,18 @@ def main():
         return (pr.x - x0) * scale, (pr.y - y0) * scale
 
     rr = 3 + scale
-    for line, col in ((fallback, FALLBACK), (main_line, MAIN)):
-        if line is None:
-            continue
-        for p in line.front:
+    if fallback:
+        for p in fallback.front - main_line.front:
             cx, cy = xy(p)
-            dr.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), fill=col, outline=(255, 255, 255))
-            dr.text((cx, cy), f"{d.need(p, line.approaches[p], width, len(foes) / len(line.front), foe_width):.0f}", fill=(255, 255, 255), font=font(7 + scale),
-                    anchor="mm")
+            dr.ellipse((cx - rr / 2, cy - rr / 2, cx + rr / 2, cy + rr / 2), fill=FALLBACK, outline=(255, 255, 255))
+    for p in sorted(set(main_line.front) | points):
+        cx, cy = xy(p)
+        box = (cx - rr - 1, cy - rr - 1, cx + rr + 1, cy + rr + 1)
+        if p in points:
+            dr.rectangle(box, fill=(20, 110, 40), outline=(255, 255, 255))
+        else:
+            dr.ellipse(box, fill=MAIN, outline=(255, 255, 255))
+        dr.text((cx, cy), str(posted.get(p, 0)), fill=(255, 255, 255), font=font(8 + scale), anchor="mm")
     for p, v in sorted(vps.items(), key=lambda x: -x[1])[:12]:
         cx, cy = xy(p)
         dr.regular_polygon((cx, cy - 3 * rr, 2 + rr + v ** 0.5 / 2), 5, fill=(255, 215, 0), outline=(0, 0, 0))
@@ -153,12 +168,13 @@ def main():
                       f"{len(fallback.front)} provinces, needs {fallback.need:.0f}")
     dr.text((8, 8), lines_txt, fill=(0, 0, 0), font=f_small, stroke_width=2, stroke_fill=(255, 255, 255))
     dr.text((8, 8 + 14 + 2 * scale), "blue: kept (darker = harder for the attacker to reach); pale: given up; dark blue lines: rivers; "
-                                    "dots: divisions a line province needs", fill=(40, 40, 40), font=f_small,
+                                    "red: divisions on each line province; green: reserve; orange: fallback line", fill=(40, 40, 40), font=f_small,
             stroke_width=2, stroke_fill=(255, 255, 255))
     path = os.path.abspath(a.out or os.path.join(REPO, "recordings", "heatmaps", f"defence_{tag}.png"))
     os.makedirs(os.path.dirname(path), exist_ok=True)
     img.save(path)
     print(path)
+    print("orders:", ", ".join(f"{names.get(p, p)} {n}" for p, n in sorted(posted.items(), key=lambda x: -x[1])))
     if not a.no_open and sys.platform == "win32":
         os.startfile(path)
 
