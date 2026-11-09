@@ -75,7 +75,7 @@ class FileData:
                 for k, _, v in body:
                     if isinstance(v, list) and (k in self.subunits or k.startswith("category_")):
                         s = {x: y for x, y in _stats(v).items()
-                             if x in ("soft_attack", "hard_attack", "maximum_speed")}
+                             if x in COMBAT + ("maximum_speed",)}
                         if s:
                             self.tech_bonus.setdefault(name, []).append((k, s))
 
@@ -175,6 +175,8 @@ class Reader:
         return name, bats, sup, held
 
 
+COMBAT = ("soft_attack", "hard_attack", "defense", "breakthrough")  # summed over battalions
+
 def division_stats(fd, bats, sup, held, techs):
     """Stats of a division from its battalions and support companies, the equipment it holds and the researched
     TECHS."""
@@ -210,7 +212,7 @@ def division_stats(fd, bats, sup, held, techs):
             for key, s in fd.tech_bonus.get(t, ()):
                 if key in cats:
                     bonus.update(s)
-        for stat in ("soft_attack", "hard_attack"):
+        for stat in COMBAT:
             out[stat] += sum(eq_stats(a).get(stat, 0) for a in need) * (1 + mod.get(stat, 0) + bonus[stat])
         transport = pdx.get(b, "transport")
         base = [eq_stats(transport).get("maximum_speed")] if transport else \
@@ -277,7 +279,7 @@ def country(tag, divisions, proc, files=None):
         t["rows"].append(s)
     for t in out.values():
         rows = t.pop("rows")
-        for k in ("soft_attack", "hard_attack", "maximum_speed", "combat_width"):
+        for k in COMBAT + ("maximum_speed", "combat_width"):
             vals = [r[k] for r in rows]
             t[k] = sum(vals) / len(vals)
             t[k + "_range"] = (min(vals), max(vals))
