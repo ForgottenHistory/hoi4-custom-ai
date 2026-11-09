@@ -251,7 +251,12 @@ def researched(tag, fd):
 
 
 def _address(did):
-    m = re.search(r"@0x([0-9a-fA-F]+)", send(f"bridge.object 51 {did}")[0])
+    m = None
+    for t in (51, 4713):  # a division made later in a loaded game can be type 4713 (see divisions.Snapshotter)
+        r = send(f"bridge.object {t} {did}")[0]
+        m = re.search(r"@0x([0-9a-fA-F]+)", r) if r.startswith("OK CArmy") else None
+        if m:
+            break
     return int(m.group(1), 16) if m else 0
 
 

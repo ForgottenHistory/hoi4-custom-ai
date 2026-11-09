@@ -44,7 +44,10 @@ class Snapshotter:
 
     def take(self):
         send("bridge.snap reset " + self.path)
+        # divisions from the game's setup are handle type 51; ones made later in a loaded game can be 4713 (shared
+        # with unit leaders, so the class filter matters)
         send("bridge.snap now 51 class=CArmy " + FIELDS)
+        send("bridge.snap now 4713 class=CArmy " + FIELDS)
         for attempt in range(20):  # the game may still hold the file for a moment
             try:
                 with open(self.path, encoding="utf-8", errors="replace") as f:
