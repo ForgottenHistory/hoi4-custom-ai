@@ -34,7 +34,8 @@ def game_time(tag):
     text = query(f'{tag} = {{ log = "[GetDateText]" }}')[0].strip()
     hm, day_month, year = [x.strip() for x in text.split(",")]
     day, month = day_month.split()
-    return datetime.datetime(int(year), MONTHS[month.lower()], int(day), int(hm.split(":")[0]))
+    hour = int(hm.split(":")[0])  # the game shows midnight as 24:00 of the day before
+    return datetime.datetime(int(year), MONTHS[month.lower()], int(day)) + datetime.timedelta(hours=hour)
 
 
 def country_ids(max_id=1000):
@@ -81,9 +82,13 @@ class Log:
         self.moves.write("time\tdivision\tfrom\tto\tkind\tresult\n")
         self._cols = None
 
+    COLS = ["date", "at_war", "enemies", "divisions", "front", "main_front", "breakthroughs", "attacks",
+            "attackers", "retreats", "unposted", "orders", "moves", "failed", "our_power", "enemy_power",
+            "target_provinces", "taken", "goal", "capitulated", "ms"]
+
     def tick(self, row):
         if self._cols is None:
-            self._cols = list(row)
+            self._cols = self.COLS + [k for k in row if k not in self.COLS]
             self.ticks.write("\t".join(self._cols) + "\n")
         self.ticks.write("\t".join(str(row.get(c, "")) for c in self._cols) + "\n")
         self.ticks.flush()
