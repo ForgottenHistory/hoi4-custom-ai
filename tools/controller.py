@@ -11,6 +11,7 @@ Logs to recordings/controller_<TAG>_<time>/: ticks.tsv (one line per planning st
 sent). Stops with Ctrl+C, or when the target capitulates.
 """
 import argparse
+import collections
 import datetime
 import os
 import re
@@ -96,16 +97,17 @@ def keep_in_group(gid, army_ids):
 
 def build_structure(m, provinces, divs, tag, me, tgt, fast_units, friend_ids, cache):
     """Build the armies, generals and the army group (hoi4ai/organize.py) with bridge.army.
-    Returns (summary lines, army group id or 0, the group's army ids)."""
+    Returns (summary lines, army group id or 0, the group's army ids, {division id: army id})."""
     lead = leaders_mod.load(tag, os.path.join(cache, "leaders.tsv"))
     group, others, marshal = organize.plan(m, provinces.controller, divs, tag, me, tgt, fast_units, lead, friend_ids)
-    lines, group_ids = [], []
+    lines, group_ids, membership = [], [], {}
     for army in group + others:
         r = send("bridge.army create " + " ".join(str(d.id) for d in army.divisions))[0]
         if not r.startswith("OK"):
             lines.append(f"{army.role}: {r}")
             continue
         aid = int(r.split()[2])
+        membership.update({d.id: aid for d in army.divisions})
         if army in group:
             group_ids.append(aid)
         led = ""
@@ -128,7 +130,7 @@ def build_structure(m, provinces, divs, tag, me, tgt, fast_units, friend_ids, ca
             gid = 0
     else:
         gid = 0
-    return lines, gid, group_ids
+    return lines, gid, group_ids, membership
 
 
 def enemies_of(tag):
@@ -145,7 +147,7 @@ class Log:
         self._cols = None
 
     COLS = ["date", "at_war", "enemies", "divisions", "fast", "front", "main_front", "fast_points",
-            "support_points", "fast_attacks", "fast_attacks_divisions", "attacks", "attacks_divisions", "retreats",
+            "support_points", "fast_attacks", "fast_attacks_divisions", "attacks", "attacks_divisions", "stops",
             "unposted", "short_of_supply", "max_stack", "orders", "moves", "failed", "our_power", "enemy_power",
             "target_provinces", "taken", "goal", "capitulated", "ms"]
 
@@ -195,15 +197,17 @@ def main():
     if a.organize and not a.dry_run:
         provinces.refresh()
         friend_ids0 = [ids[t] for t in friends_of(tag) if t in ids]
-        lines, group_id, group_armies = build_structure(m, provinces, snap.take(), tag, me, tgt, fast_units,
-                                                        friend_ids0, os.path.join(REPO, ".cache"))
+        lines, group_id, group_armies, membership = build_structure(m, provinces, snap.take(), tag, me, tgt,
+                                                                    fast_units, friend_ids0, os.path.join(REPO, ".cache"))
         for line in lines:
             print("  " + line)
     elif a.group and len(a.group) > 1:
-        group_id, group_armies = a.group[0], a.group[1:]
+        group_id, group_armies, membership = a.group[0], a.group[1:], {}
     else:
-        group_id, group_armies = 0, []
+        group_id, group_armies, membership = 0, [], {}
     ticks = 0
+    can_stop = send("bridge.stop")[0].startswith("FAIL usage: bridge.stop")
+    print("stopping attacks with", "bridge.stop" if can_stop else "a move back to the division's own province")
     protected = set()
     war_start = None
     last = None
@@ -236,6 +240,15 @@ def main():
                 war_start = now
             orders, rep = planner.plan(provinces.controller, divs, tag, enemy_ids, tgt, at_war, friend_ids)
             mine = {d.id: d for d in divs if d.owner == tag}
+            if membership and not a.dry_run:  # divisions that drifted out of their army go back
+                strays = collections.defaultdict(list)
+                for did, aid in membership.items():
+                    d = mine.get(did)
+                    if d is not None and d.army != aid:
+                        strays[aid].append(did)
+                for aid, dids in strays.items():
+                    r = send(f"bridge.army add {aid} " + " ".join(map(str, dids)))[0]
+                    print(f"army {aid}: put back {len(dids)} divisions: {r}")
             new = [i for i in mine if i not in protected]
             if new and not a.dry_run:
                 send("bridge.protect add " + " ".join(map(str, new)))
@@ -249,6 +262,9 @@ def main():
                 kind = "attack" if provinces.controller[prov] in set(enemy_ids) else "post"
                 cmds.append(f"bridge.move {did} {prov}")
                 batch.append((d, prov, kind))
+            for d in planner.stops:  # attacks to call off
+                cmds.append(f"bridge.stop {d.id}" if can_stop else f"bridge.move {d.id} {d.province}")
+                batch.append((d, d.province, "stop"))
             if cmds and not a.dry_run:
                 for i in range(0, len(cmds), 40):
                     for (d, prov, kind), r in zip(batch[i:i + 40], send(*cmds[i:i + 40])):

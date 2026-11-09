@@ -41,7 +41,10 @@ class Settings:
     fast_margin = 1.1          # the same for the fast army
     attack_min_org = 0.55      # share of a division's best organisation it needs to attack
     fast_min_org = 0.40
-    retreat_org = 0.20         # attackers below this share are pulled back
+    stop_org = 0.30            # an attacker below this share of its best organisation stops attacking
+    attack_floor = 10000       # no attack below 10 organisation, whatever the share
+    fast_cap = 5               # fast divisions sent at one province (the rest look for other openings)
+    infantry_cap = 6           # infantry divisions sent at one province
     support_every = 10         # one infantry support point per this many reserve infantry divisions
     max_support = 4
     support_route = 1.2        # support points only on routes at most this much dearer than the best
@@ -57,6 +60,7 @@ class Planner:
         self.fast_units = set(fast_units)
         self.s = settings or Settings()
         self.best_org = {}          # division id -> highest org seen
+        self.template_org = {}      # template name -> highest org seen on any division of it
         self.hold = {}              # division id -> province it holds / stages at
         self.points = {}            # province -> (kind 'fast' | 'support', steps left)
         self.tick = 0
@@ -82,9 +86,15 @@ class Planner:
         return getattr(d, "unit", None) in self.fast_units
 
     def org_share(self, d):
-        best = max(self.best_org.get(d.id, 0), d.org)
-        self.best_org[d.id] = best
+        """Organisation as a share of the best seen, for the division or any division of its template (so a
+        division first seen worn out doesn't count as fresh)."""
+        self.best_org[d.id] = max(self.best_org.get(d.id, 0), d.org)
+        self.template_org[d.template] = max(self.template_org.get(d.template, 0), d.org)
+        best = max(self.best_org[d.id], self.template_org[d.template])
         return d.org / best if best else 0.0
+
+    def can_attack(self, d, min_share):
+        return d.org >= self.s.attack_floor and self.org_share(d) >= min_share
 
     def terrain(self, p):
         return TERRAIN_COST.get(self.m.provinces[p].terrain, 2.0)
@@ -164,6 +174,8 @@ class Planner:
         ours = {self.me} | set(friends)
         own = {p for p in land if ctrl[p] in ours}
         mine = [d for d in divisions if d.owner == my_tag and d.province in land]
+        for d in mine:  # see every division's organisation first, so template bests are known this step
+            self.org_share(d)
         foe_power = collections.Counter()
         for d in divisions:
             if d.owner != my_tag and d.province in land and ctrl[d.province] in hostile:
@@ -207,7 +219,7 @@ class Planner:
 
         for p in list(self.points):
             kind, left = self.points[p]
-            if left <= 1 or p not in main:
+            if left <= 1 or p not in main or (at_war and kind == "fast"):  # at war the fast point follows openings
                 del self.points[p]
             else:
                 self.points[p] = (kind, left - 1)
@@ -220,12 +232,24 @@ class Planner:
         for p in front:
             front_in[comp[p]].add(p)
 
+        pocket = target_land - body
+
+        def needs_holder(p):
+            f = facing[p]
+            if not f or not all(q in pocket for q in f):
+                return True
+            return any(foe_power[q] > 0 for q in f)
+
         line_demand, fast_demand, sectors = {}, {}, {}
         for c, fr in front_in.items():
+            fr = {p for p in fr if needs_holder(p)}
+            if not fr:
+                continue
             score = {p: route_from(p) for p in fr if p in main}
             score = {p: v for p, v in score.items() if v < math.inf}
             fscore = {p: route_from(p, fast_route) for p in fr if p in main}
             fscore = {p: v for p, v in fscore.items() if v < math.inf}
+            body_front = set(fscore) or set(score)  # where reserves may spread along the line
             n_line, n_fast = line_in[c], fast_in[c]
             # infantry holds the line; if short, where the enemy is strongest, the main front first
             if n_line < len(fr):
@@ -253,7 +277,7 @@ class Planner:
             used = set()
             load = dict(line_demand)  # holders already stand there
             for b in fpts:
-                placed = self.place(b, math.ceil(n_fast / len(fpts)), fscore, own, load, fast_demand, front)
+                placed = self.place(b, math.ceil(n_fast / len(fpts)), fscore, own, load, fast_demand, body_front)
                 sectors[b] = ("fast", placed)
                 used.update(self.sector(b, fscore))
             # infantry support points: along the next best routes of the main axis, apart from each other and
@@ -281,12 +305,12 @@ class Planner:
             if fpts and behind:
                 per = math.ceil(behind / len(fpts))
                 for b in fpts:
-                    placed = self.place(b, per, fscore, own, load, line_demand, front)
+                    placed = self.place(b, per, fscore, own, load, line_demand, body_front)
                     sectors[b] = ("fast", sorted(set(sectors[b][1]) | set(placed)))
             if spts and reserves - behind:
                 per = math.ceil((reserves - behind) / len(spts))
                 for b in spts:
-                    placed = self.place(b, per, score, own, load, line_demand, front)
+                    placed = self.place(b, per, score, own, load, line_demand, body_front)
                     sectors.setdefault(b, ("support", placed))
 
         self.view = dict(front=front, main=main, goal=goal, foe_power=dict(foe_power), component=comp,
@@ -303,12 +327,12 @@ class Planner:
                 if not d.moving and d.province in land and ctrl[d.province] in ours:
                     here[d.province].append(d)
 
-            def attack(targets, eligible, margin, min_org, keep_home, label):
+            def attack(targets, eligible, margin, min_org, keep_home, label, cap):
                 for t in targets:
                     pool = []
                     for p in self.nb(t):
                         staying = [d for d in here.get(p, ()) if d.id not in attacking]
-                        ready = sorted((d for d in staying if eligible(d) and self.org_share(d) >= min_org),
+                        ready = sorted((d for d in staying if eligible(d) and self.can_attack(d, min_org)),
                                        key=power, reverse=True)
                         exposed = keep_home and any(foe_power[q] > 0 for q in facing.get(p, ()) if q != t)
                         pool += ready[:max(0, len(staying) - 1)] if exposed else ready
@@ -318,7 +342,7 @@ class Planner:
                     need = foe_power[t] * self.terrain(t) * margin * RIVER_ATTACK[rv]
                     chosen, total = [], 0.0
                     for d in pool:
-                        if total > need and chosen:
+                        if (total > need and chosen) or len(chosen) >= cap:
                             break
                         chosen.append(d)
                         total += power(d)
@@ -333,17 +357,27 @@ class Planner:
             fast_at = {d.province for d in fast if d.id not in attacking}
             fast_targets = sorted({t for p in fast_at for t in self.nb(p) if ctrl[t] in hostile and t in fast_route},
                                   key=fast_route.get)
-            attack(fast_targets, self.is_fast, s.fast_margin, s.fast_min_org, False, "fast_attacks")
+            attack(fast_targets, self.is_fast, s.fast_margin, s.fast_min_org, False, "fast_attacks", s.fast_cap)
             # infantry: local attacks where clearly stronger; weak, open, on-route provinces first
             cands = {t for p in front for t in facing[p] if ctrl[t] == target}
             ranked = sorted(cands, key=lambda t: (foe_power[t] + 10) * self.terrain(t) + route.get(t, 99) / 10)
-            attack(ranked, lambda d: not self.is_fast(d), s.attack_margin, s.attack_min_org, True, "attacks")
+            attack(ranked, lambda d: not self.is_fast(d), s.attack_margin, s.attack_min_org, True, "attacks",
+                   s.infantry_cap)
 
-        for d in mine:  # pull back worn-out attackers
-            if d.moving and d.dest in land and ctrl[d.dest] in hostile and self.org_share(d) < s.retreat_org:
-                orders[d.id] = d.province
-                attacking.add(d.id)
-                report["retreats"] += 1
+        # stop attacks: a worn-out attacker, or everyone on a province we no longer outweigh (a player's micro)
+        self.stops = []
+        on_target = collections.defaultdict(list)
+        for d in mine:
+            if d.id not in attacking and d.moving and d.dest in land and ctrl[d.dest] in hostile:
+                on_target[d.dest].append(d)
+        for t, ds in on_target.items():
+            rv = max((m.river(d.province, t) for d in ds), default=0)
+            hopeless = foe_power[t] > 0 and sum(power(d) for d in ds) < foe_power[t] * self.terrain(t) * RIVER_ATTACK[rv]
+            for d in ds:
+                if hopeless or self.org_share(d) < s.stop_org:
+                    self.stops.append(d)
+                    attacking.add(d.id)  # leave it alone this step
+                    report["stops"] += 1
 
         # --- everyone else: fill the posts, nearest first, keeping last step's posts ---------------------------
         unposted = 0
