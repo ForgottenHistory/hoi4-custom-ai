@@ -27,12 +27,29 @@ all the way; the AI tried to cancel it 103 times and to build German armies 1526
 
 | script | does |
 |---|---|
+| `tools/mapcheck.py [PROVINCE ..]` | build the map (through the active mods), print a province's neighbours, check it against the running game and count who controls what |
 | `tools/takeover.py TAG` / `--release TAG` | take a country's land army from the AI (or give it back) |
 | `tools/cmdrec.py [--dir FOLDER] [--tag TAG]` | record every command the game executes, with the in-game date, and a daily snapshot of every division; Ctrl+C stops |
 | `tools/analyze_cmdrec.py RECORD [--countries ..]` | per country: commands by kind, orders touched, where divisions are sent (moves, rail), assignment churn |
 | `tools/analyze_snaps.py [SNAPSHOTS] [--countries ..]` | per country and day: divisions, strength, organisation, divisions moved, in plans, lost |
 
 Recordings go in `recordings/` (not in git: tens of MB each).
+
+## Library (`hoi4ai/`)
+
+Mods: nothing about the map or the countries is hard-coded. Map data comes from the files the game itself loads,
+and live data from the running game's memory.
+
+- `gamefiles.py`: the game's files, through the active mods. The mods are the ones the launcher wrote to
+  `dlc_load.json` for the last launch, in that order: a later mod's file wins, and `replace_path` hides the
+  base game's (and earlier mods') files in that folder. The game folder is taken from the running `hoi4.exe`.
+- `mapdata.py`: provinces (land/sea/lake, terrain, continent, centre), neighbours (pixels touching in the
+  `provinces.bmp` named by `default.map`, plus `adjacencies.csv` crossings, minus its `impassable` borders), shared
+  border length, and states (provinces, victory points) from `history/states`. Built in ~1 s, cached in `.cache/`.
+- `memory.py`: reads the game's memory (read-only) and names objects by their RTTI class. It starts from the
+  game state (`CCurrentGameState`), using the static the exe keeps only when RTTI confirms it, else by class
+  name.
+- `live.py`: every province's controller, owner and state in one pass (~35 ms).
 
 ## Findings so far (Germany vs Poland, 1939 start)
 
@@ -56,5 +73,9 @@ provinces with direct moves.
   template name `*(+0x3a8)+0x20`. Full object: path at +0x2c0, destination +0x2b4.
 - Order (front / battle plan / army, type 53): owner +0x3c. Theatre (type 67): no owner field; its armies'
   list at +0x80 (owner of the first), divisions' list at +0x68.
+- Provinces: `CCurrentGameState` +0x2b0 is a vector of `CProvince*` indexed by province id. `CProvince`: id
+  +0xa4, `CState*` +0xc0, controller country id +0x188 (checked by changing a province's controller with
+  `set_province_controller`), `CControllerArea*` +0xd0, `COwnerArea*` +0xd8. `CState`: id +0x58 (agrees with
+  the files for all land provinces), owner +0xc8, controller +0xcc.
 - `CMoveCommand`: embeds a `CUnitMoveAction` at +0x28: division handle +0x38, province path (ids) +0x40 /
   count +0x4c. Player moves use flags `1 2 1 0 0 0 0`.

@@ -16,6 +16,7 @@ import re
 import time
 
 import _bridge  # noqa: F401  (puts the hoi4-bridge client on the path)
+from hoi4ai.gamefiles import game_dir
 from hoi4bridge import BridgeError, player_tag, query, send
 
 
@@ -54,16 +55,15 @@ def main():
     except BridgeError:
         player = "none"
     tag = a.tag or (player if player != "none" else "GER")
-    folder = os.path.abspath(a.dir) if a.dir else None
-    if folder:
-        os.makedirs(folder, exist_ok=True)
+    folder = os.path.abspath(a.dir) if a.dir else game_dir()
+    os.makedirs(folder, exist_ok=True)
     if a.skip:
         print(send("bridge.cmdrec skip " + " ".join(a.skip))[0])
-    print(send("bridge.cmdrec on" + (" " + os.path.join(folder, "command_record.tsv") if folder else ""))[0])
+    print(send("bridge.cmdrec on " + os.path.join(folder, "command_record.tsv"))[0])
     send(f"bridge.cmdrec mark player={player}")
     print(f"player: {player}, date from {tag}")
     if not a.no_snap:
-        print(send("bridge.snap reset" + (" " + os.path.join(folder, "unit_snapshots.tsv") if folder else ""))[0],
+        print(send("bridge.snap reset " + os.path.join(folder, "unit_snapshots.tsv"))[0],
               "(division snapshots)")
     last, last_day = None, None
     try:
