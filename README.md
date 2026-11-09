@@ -96,8 +96,8 @@ provinces with direct moves.
   `*(+0x1e0)+0xa4`, main sub-unit type `*(+0x128)+0x68` (std::string), destination +0x2a4 (0 = none), probably supply level +0x490 (100000 = full;
   72727 in a starving 23-division stack), order `*(+0xb0)+0xc`, organisation +0x20, strength +0x30 (fixed point, 100000 = 100%),
   template name `*(+0x3a8)+0x20`. Full object: path at +0x2c0, destination +0x2b4.
-- Unit leader (`CArmyLeader`, handle type 4713): name +0x40, key +0x20, country +0x120, kind +0xe7c (0 field
-  marshal, 1 general), skills attack +0xf58, defence +0xf68, planning +0xf78, logistics +0xf88.
+- Unit leader (`CArmyLeader`, handle type 4713): name +0x40, key +0x20, country +0x120, type +0xe7c (1 usable;
+  type 0 leaders get removed by the game when given a command), field marshal flag +0xde8, skills attack +0xf58, defence +0xf68, planning +0xf78, logistics +0xf88.
 - Order (front / battle plan / army, type 53): owner +0x3c. Theatre (type 67): no owner field; its armies'
   list at +0x80 (owner of the first), divisions' list at +0x68.
 - Provinces: `CCurrentGameState` +0x2b0 is a vector of `CProvince*` indexed by province id. `CProvince`: id
