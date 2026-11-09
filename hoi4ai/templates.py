@@ -229,6 +229,18 @@ def division_stats(fd, bats, sup, held, techs):
     return out
 
 
+def terrain_widths(files=None):
+    """{terrain: (combat width, extra width per extra direction attacked from)} from common/terrain."""
+    files = files or GameFiles()
+    out = {}
+    for _, path in sorted(files.listdir("common/terrain", ".txt").items()):
+        tree = pdx.parse(open(path, encoding="utf-8-sig", errors="replace").read())
+        for name, _, body in pdx.get(tree, "categories", []) or []:
+            if isinstance(body, list) and pdx.get(body, "combat_width") is not None:
+                out[name] = (_num(pdx.get(body, "combat_width")), _num(pdx.get(body, "combat_support_width")))
+    return out
+
+
 def researched(tag, fd):
     """The techs in fd.tech_bonus the country has (asked of the game, one batch)."""
     names = sorted(fd.tech_bonus)

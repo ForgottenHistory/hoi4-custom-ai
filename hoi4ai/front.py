@@ -5,6 +5,9 @@
   attack modifier in the target's terrain.
   So mountaineers are picked first to attack hills and mountains, tanks avoid forests, cities and rivers, and
   weak divisions (security divisions: no support companies) are the ones left holding while the others attack.
+- An attack counts only the divisions that fit the battle's combat width (the terrain's, widened for every extra
+  province attacked from) and takes its attackers from the provinces around in turn: two divisions from two sides
+  fight better than two from one.
 - Infantry holds the line: one division on every province facing the enemy. Half the rest stands behind the
   fast army to follow and widen its breach, the other half at a few support points along good routes; reserves
   fill nearby front provinces before going deep. Infantry attacks locally where it clearly outweighs the
@@ -37,6 +40,11 @@ import math
 # cost of moving and fighting through a province, by terrain (plains = 1)
 TERRAIN_COST = {"plains": 1.0, "desert": 1.0, "urban": 1.5, "forest": 2.0, "hills": 2.0, "jungle": 3.0,
                 "marsh": 3.0, "mountain": 4.0}
+# combat width of a battle: the terrain's, plus the second number per extra direction attacked from (the game's
+# common/terrain; the controller loads them, these are the base game's)
+TERRAIN_WIDTH = {"plains": (70, 35), "desert": (70, 35), "hills": (70, 35), "urban": (80, 40), "forest": (60, 30),
+                 "jungle": (60, 30), "marsh": (50, 25), "mountain": (50, 25)}
+DIVISION_WIDTH = 18  # a division whose template we don't know (9 infantry battalions)
 RIVER_COST = {0: 0.0, 1: 1.0, 2: 2.0}        # added to a route for crossing a small / large river
 RIVER_ATTACK = {0: 1.0, 1: 1.25, 2: 1.5}     # extra strength wanted to attack across one
 FULL_DIVISION = 80.0
@@ -65,6 +73,8 @@ class Settings:
     infantry_overkill = 2.0
     fast_cap = 5               # fast divisions sent at one province (the rest look for other openings)
     infantry_cap = 6           # infantry divisions sent at one province
+    width_slack = 1.25         # attackers fill the battle's combat width up to this much (a few in reserve
+                               # replace the worn-out); attacking from more provinces widens the battle
     fast_reach = 6.0           # fast army: how fast a victory point's pull fades with route cost
     fast_foe_weight = 2.0      # fast army: defenders count this much more on its routes (tanks go around strength)
     support_every = 10         # one infantry support point per this many reserve infantry divisions
@@ -86,6 +96,7 @@ class Planner:
         self.m, self.me = m, me
         self.stats, self.ref_soft = {}, {}
         self.set_stats(stats or {})
+        self.widths = dict(TERRAIN_WIDTH)
         self.fast_units = set(fast_units)
         self.armored_units = set(armored_units)
         self.s = settings or Settings()
@@ -157,6 +168,16 @@ class Planner:
         if target is not None and target in self.m.provinces:
             q *= 1.0 + t.get("terrain", {}).get(self.m.provinces[target].terrain, {}).get("attack", 0.0)
         return q
+
+    def width(self, d):
+        """A division's combat width (its template's)."""
+        t = self.stats.get(getattr(d, "template", None))
+        return t["combat_width"] if t and t.get("combat_width") else DIVISION_WIDTH
+
+    def battle_width(self, target, directions):
+        """Combat width of a battle for TARGET attacked from DIRECTIONS provinces."""
+        base, extra = self.widths.get(self.m.provinces[target].terrain, (70, 35))
+        return base + extra * max(0, directions - 1)
 
     def attack_power(self, d, target=None):
         """A division's power as an attacker (at TARGET): armour counts extra (armor_factor), and its template's
@@ -445,7 +466,9 @@ class Planner:
 
             def attack(targets, eligible, margin, min_org, keep_home, label, cap, overkill=1.0):
                 # NEED (margin x defenders x terrain) decides whether to attack; then up to OVERKILL x NEED is sent,
-                # within CAP: more attackers end a battle sooner (a player sends what stands next to the province)
+                # within CAP: more attackers end a battle sooner (a player sends what stands next to the province).
+                # Only what fits the battle's combat width fights, and every province attacked from widens it: the
+                # attackers are taken from the provinces around in turn, and one that wouldn't fit is left out
                 for t in targets:
                     ap = lambda d: self.attack_power(d, t)
                     already = sum(ap(d) for d in under_way[t])
@@ -465,11 +488,25 @@ class Planner:
                     need = foe_power[t] * self.terrain(t) * margin * RIVER_ATTACK[rv]
                     if under_way[t] and already > need * overkill:
                         continue  # enough on the way
-                    chosen, total = [], already
+                    # the best of each province around in turn: as many directions as possible
+                    by_src = collections.defaultdict(list)
                     for d in pool:
+                        by_src[d.province].append(d)
+                    srcs = sorted(by_src, key=lambda p: -ap(by_src[p][0]))
+                    order = []
+                    for k in range(max((len(v) for v in by_src.values()), default=0)):
+                        order += [by_src[p][k] for p in srcs if k < len(by_src[p])]
+                    dirs = {d.province for d in under_way[t]}
+                    used = sum(self.width(d) for d in under_way[t])
+                    chosen, total = [], already
+                    for d in order:
                         if (total > need * overkill and chosen) or len(chosen) >= room:
                             break
+                        if used + self.width(d) > self.battle_width(t, len(dirs | {d.province})) * s.width_slack:
+                            continue  # no room in the battle from here
                         chosen.append(d)
+                        dirs.add(d.province)
+                        used += self.width(d)
                         total += ap(d)
                     if chosen and total > need:
                         under_way[t] += chosen

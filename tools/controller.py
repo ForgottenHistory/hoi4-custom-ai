@@ -278,6 +278,10 @@ def main():
             print("template stats:", e)
             return
         planner.set_stats(st)
+        try:
+            planner.widths.update(templates.terrain_widths())
+        except OSError as e:
+            print("terrain widths:", e)
         print("templates: " + "; ".join(f"{n} x{t['count']} soft {t['soft_attack']:.0f} -> "
                                          f"{planner.quality(type('D', (), {'template': n})()):.2f}"
                                          for n, t in sorted(st.items(), key=lambda x: -x[1]['count'])))
