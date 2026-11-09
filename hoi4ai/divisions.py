@@ -5,14 +5,15 @@ import time
 from hoi4bridge import send
 
 # CArmy (handle 51) fields: owner, province, destination (0 = none), current organisation, strength, template name,
-# main sub-unit type (the one its map counter shows: CSubUnitDefinition at +0x128, its key at +0x18; +0x68 is
-# its sprite, "infantry" for mountaineers), and +0x490,
+# main sub-unit sprite (the map counter's: +0x128 -> a CSubUnitDefinition whose key at +0x18 is "---"; its
+# sprite at +0x68 is "infantry" for mountaineers, "light_armor" / "motorized" for those, so it tells fast from
+# slow; the template's battalions are in hoi4ai/templates.py), and +0x490,
 # probably its supply level (100000 = fully supplied; 72727 in a starving 23-division stack, 100000 elsewhere),
 # and the id of the army (or front) it is in, 0 if none (+0xb0 -> its COrdersGroup, id at +0xc), and the path it
 # is moving along ({int province ids} vector at +0x1f0, count +0x1fc: the next province first; battle plans move
 # divisions along it without setting the destination at +0x2a4): its length and next province.
 # Fixed point x1000; strength 100000 = 100%.
-FIELDS = "c1c8 i1e0.a4 i2a4 i20 i30 s3a8.20 s128.18 i490 ib0.c i1fc i1f0.0"
+FIELDS = "c1c8 i1e0.a4 i2a4 i20 i30 s3a8.20 s128.68 i490 ib0.c i1fc i1f0.0"
 
 
 class Division:

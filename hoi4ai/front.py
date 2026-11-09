@@ -1,5 +1,9 @@
 """Army planning, after how a player runs an offensive (Germany vs Poland, 1939):
 
+- Division roles come from their templates' stats (hoi4ai/templates.py): attack power is organisation x strength
+  x soft attack against the main infantry template's, and x the template's attack modifier in the target's terrain.
+  So mountaineers are picked first to attack hills and mountains, tanks avoid forests, cities and rivers, and
+  weak divisions (security divisions: no support companies) are the ones left holding while the others attack.
 - Infantry holds the line: one division on every province facing the enemy. Half the rest stands behind the
   fast army to follow and widen its breach, the other half at a few support points along good routes; reserves
   fill nearby front provinces before going deep. Infantry attacks locally where it clearly outweighs the
@@ -76,8 +80,9 @@ class Settings:
 
 
 class Planner:
-    def __init__(self, m, me, fast_units=(), settings=None, armored_units=()):
+    def __init__(self, m, me, fast_units=(), settings=None, armored_units=(), stats=None):
         self.m, self.me = m, me
+        self.set_stats(stats or {})
         self.fast_units = set(fast_units)
         self.armored_units = set(armored_units)
         self.s = settings or Settings()
@@ -121,9 +126,33 @@ class Planner:
             p = min((n for n in self.nb(p) if n in dist and dist[n] < dist[p]), key=dist.get)
         return p
 
-    def attack_power(self, d):
-        """A division's power as an attacker: armour counts extra (armor_factor)."""
-        return power(d) * (self.s.armor_factor if getattr(d, "unit", None) in self.armored_units else 1.0)
+    def set_stats(self, stats):
+        """STATS: {template name: {"soft_attack", "terrain": {terrain: {"attack": modifier}}}} (templates.country).
+        Soft attack counts against the template most of the slow divisions use (the main infantry)."""
+        self.stats = stats
+        slow = [t for t in stats.values() if t.get("count") and t.get("maximum_speed", 4) < 6]
+        ref = max(slow, key=lambda t: t["count"], default=None)
+        self.ref_soft = ref["soft_attack"] if ref and ref.get("soft_attack") else 0.0
+
+    def quality(self, d, target=None):
+        """How hard a division hits for its organisation x strength, from its template: soft attack against the
+        main infantry's (an armoured division counts at least as much: its armour carries it against 1939
+        infantry, see armor_factor), times its attack modifier in TARGET's terrain."""
+        t = self.stats.get(getattr(d, "template", None))
+        if not t or not self.ref_soft:
+            return 1.0
+        q = min(1.6, max(0.4, t.get("soft_attack", 0) / self.ref_soft))
+        if getattr(d, "unit", None) in self.armored_units:
+            q = max(q, 1.0)
+        if target is not None and target in self.m.provinces:
+            q *= 1.0 + t.get("terrain", {}).get(self.m.provinces[target].terrain, {}).get("attack", 0.0)
+        return q
+
+    def attack_power(self, d, target=None):
+        """A division's power as an attacker (at TARGET): armour counts extra (armor_factor), and its template's
+        soft attack and terrain modifier (quality)."""
+        return power(d) * self.quality(d, target) * (
+            self.s.armor_factor if getattr(d, "unit", None) in self.armored_units else 1.0)
 
     def is_fast(self, d):
         return getattr(d, "unit", None) in self.fast_units
@@ -408,7 +437,8 @@ class Planner:
                 # NEED (margin x defenders x terrain) decides whether to attack; then up to OVERKILL x NEED is sent,
                 # within CAP: more attackers end a battle sooner (a player sends what stands next to the province)
                 for t in targets:
-                    already = sum(self.attack_power(d) for d in under_way[t])
+                    ap = lambda d: self.attack_power(d, t)
+                    already = sum(ap(d) for d in under_way[t])
                     room = cap - len(under_way[t])
                     if room <= 0:
                         continue
@@ -416,10 +446,10 @@ class Planner:
                     for p in self.nb(t):
                         staying = [d for d in here.get(p, ()) if d.id not in attacking]
                         ready = sorted((d for d in staying if eligible(d) and self.can_attack(d, min_org)),
-                                       key=self.attack_power, reverse=True)
+                                       key=ap, reverse=True)
                         exposed = keep_home and any(foe_power[q] > 0 for q in facing.get(p, ()) if q != t)
                         pool += ready[:max(0, len(staying) - 1)] if exposed else ready
-                    pool.sort(key=self.attack_power, reverse=True)
+                    pool.sort(key=ap, reverse=True)
                     # attacked across the worst river among the provinces we attack from
                     rv = max((m.river(d.province, t) for d in pool), default=0)
                     need = foe_power[t] * self.terrain(t) * margin * RIVER_ATTACK[rv]
@@ -430,7 +460,7 @@ class Planner:
                         if (total > need * overkill and chosen) or len(chosen) >= room:
                             break
                         chosen.append(d)
-                        total += self.attack_power(d)
+                        total += ap(d)
                     if chosen and total > need:
                         under_way[t] += chosen
                         for d in chosen:
@@ -493,7 +523,7 @@ class Planner:
                 to_open = self.bfs(list(open_land), passable_inf)  # steps to the nearest empty enemy province
                 held = set()
                 free = []
-                for d in sorted(line, key=power):
+                for d in sorted(line, key=self.attack_power):
                     if d.id in attacking or d.province not in own or not self.can_attack(d, s.attack_min_org):
                         continue
                     if d.moving and d.dest in land and ctrl[d.dest] in hostile:
@@ -538,7 +568,7 @@ class Planner:
                 on_target[d.dest].append(d)
         for t, ds in on_target.items():
             rv = max((m.river(d.province, t) for d in ds), default=0)
-            hopeless = (foe_power[t] > 0 and sum(self.attack_power(d) for d in ds)
+            hopeless = (foe_power[t] > 0 and sum(self.attack_power(d, t) for d in ds)
                         < foe_power[t] * self.terrain(t) * RIVER_ATTACK[rv])
             for d in ds:
                 if hopeless or self.org_share(d) < s.stop_org:

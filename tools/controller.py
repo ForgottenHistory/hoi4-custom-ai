@@ -267,6 +267,20 @@ def main():
     unit_types = units.load()
     fast_units = {n for n, u in unit_types.items() if u.fast}
     planner = Planner(m, me, fast_units, armored_units={n for n, u in unit_types.items() if u.armored})
+    stats_day = None  # templates' stats (roles): at the start, then again when a new template shows up
+
+    def load_stats(divs):
+        from hoi4ai import templates
+        from hoi4ai.memory import Process
+        try:
+            st = templates.country(tag, divs, Process())
+        except Exception as e:  # the plan works without (every division counts as the main infantry)
+            print("template stats:", e)
+            return
+        planner.set_stats(st)
+        print("templates: " + "; ".join(f"{n} x{t['count']} soft {t['soft_attack']:.0f} -> "
+                                         f"{planner.quality(type('D', (), {'template': n})()):.2f}"
+                                         for n, t in sorted(st.items(), key=lambda x: -x[1]['count'])))
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     log = Log(os.path.join(REPO, "recordings", f"controller_{tag}_{stamp}"))
     rec = None
@@ -412,6 +426,10 @@ def main():
                 last = None
                 time.sleep(1)
                 continue
+            if now.date() != stats_day and (stats_day is None or any(
+                    d.owner == tag and d.template not in planner.stats for d in divs)):
+                stats_day = now.date()
+                load_stats(divs)
             if army_order and not a.dry_run and now.date() != leader_day:  # once a day: generals and field marshal
                 leader_day = now.date()
                 # every army of ours: the group's first (the fast one first), then the others (garrisons, exclaves)
