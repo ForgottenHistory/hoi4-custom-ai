@@ -93,6 +93,22 @@ class Planner:
                     q.append(n)
         return dist
 
+    def waypoint(self, start, goal, passable, k=3):
+        """Where to send a division from START to GOAL so it goes around what isn't PASSABLE (the game paths the
+        shortest way, through enemy-held land): K steps along the shortest route through PASSABLE (GOAL itself if
+        that close), or None if there is no such route."""
+        if start == goal:
+            return goal
+        dist = self.bfs([goal], set(passable) | {start, goal})
+        if start not in dist:
+            return None
+        p = start
+        for _ in range(k):
+            if p == goal:
+                break
+            p = min((n for n in self.nb(p) if n in dist and dist[n] < dist[p]), key=dist.get)
+        return p
+
     def is_fast(self, d):
         return getattr(d, "unit", None) in self.fast_units
 

@@ -442,13 +442,28 @@ def main():
                 r[1] = d.province
                 if r[2] >= 2:
                     del railing[did]
+            # at war the game paths the shortest way, through enemy-held land: a division going anywhere but next
+            # door is sent a few provinces along our own route instead (repositioning: through our land; a drive
+            # into the enemy's rear: through our land and empty enemy land), the next stretch every step
+            ctrl, hostile_ids = provinces.controller, set(enemy_ids)
+            if at_war:
+                foe_at = {x.province for x in divs if x.owner in set(enemy_tags)}
+                ours_land = {p for p in m.provinces if m.is_land(p) and ctrl[p] in {me, *friend_ids}}
+                open_land = ours_land | {p for p in m.provinces if m.is_land(p) and ctrl[p] in hostile_ids
+                                         and p not in foe_at}
             for did, prov in orders.items():
                 d = mine.get(did)
-                if d is None or d.dest == prov or (d.province == prov and not d.moving):
+                if d is None or (d.province == prov and not d.moving):
                     continue
                 if did in railing and railing[did][0] == prov:
                     continue  # on its way by train: a new order would take it off the train
-                kind = "attack" if provinces.controller[prov] in set(enemy_ids) else "post"
+                kind = "attack" if ctrl[prov] in hostile_ids else "post"
+                if at_war and d.province != prov and prov not in planner.nb(d.province):
+                    w = planner.waypoint(d.province, prov, ours_land if kind == "post" else open_land)
+                    if w is not None:
+                        prov = w
+                if d.dest == prov:
+                    continue
                 pa, pb = m.provinces.get(d.province), m.provinces[prov]
                 if (can_rail and not at_war and kind == "post" and pa is not None
                         and math.hypot(pa.x - pb.x, pa.y - pb.y) > RAIL_MIN_PIXELS):
