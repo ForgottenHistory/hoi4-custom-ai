@@ -8,6 +8,10 @@
   start of the best route to the enemy's heart; at war it attacks along that route and keeps going (exploits),
   always toward the cheapest way on to the main objective: the most valuable province of the enemy's main body
   (its largest connected piece of land; pockets are left to the infantry).
+- Once there is empty enemy land, every ready fast division drives into it on its own: each to its own target
+  (a province worth having: a victory point, a supply hub, a railway, or just land), the best value for the
+  distance through empty land, and keeps that target until it is ours or defended. A worn-out fast division
+  rests where it stands instead of walking back to the breach.
 - Among near-equal routes the fast army takes the one whose line to the objective leaves the most enemy
   strength on its weaker side: the thrust that cuts the enemy's army most evenly in two.
 - A route's cost counts terrain (plains cheap, forest and hills dear, marsh and mountains very dear) and the
@@ -54,6 +58,10 @@ class Settings:
     axis_tie = 1.15            # fast army starts within this much of the best route compete on how they split the enemy
     sector_size = 3            # front provinces a force spreads over (its point and best neighbours)
     keep = 8                   # planning steps a chosen point is kept while it stays on the front
+    point_drop = 1.5           # a chosen fast point is given up when its route is this much dearer than the best
+    exploit_reach = 8          # fast divisions drive this many provinces deep into empty enemy land
+    hub_value = 3.0            # a supply hub is worth this many victory points (per hub level)
+    rail_value = 0.5           # a railway province, per railway level
 
 
 class Planner:
@@ -65,6 +73,7 @@ class Planner:
         self.template_org = {}      # template name -> highest org seen on any division of it
         self.hold = {}              # division id -> province it holds / stages at
         self.points = {}            # province -> (kind 'fast' | 'support', steps left)
+        self.drive = {}             # fast division id -> the empty enemy province it drives to
         self.tick = 0
         self.view = {}
         self._land_nb = {p: [n for n in nb if m.is_land(n)] for p, nb in m.neighbours.items() if m.is_land(p)}
@@ -216,6 +225,10 @@ class Planner:
                 seen |= piece
                 if weight(piece) > weight(body):
                     body = piece
+        # what a province is worth taking: victory points, supply hubs, railways (the enemy's supply and movement)
+        def value(p):
+            return vps.get(p, 0) + s.hub_value * m.hubs.get(p, 0) + s.rail_value * m.rails.get(p, 0)
+        worth = {p: value(p) for p in target_land if value(p) > 0}
         start = {p: OBJECTIVE_BASE / (1 + v / 5.0) for p, v in vps.items()}
         route = self.routes(start, enemy_land, foe_power)  # infantry's local attacks: the nearest objective
         # the main axis (fast army, infantry reserves): the most valuable province of the enemy's main body
@@ -223,8 +236,8 @@ class Planner:
         # the fast army goes for points behind the enemy's line; those at the line are the infantry's
         at_line = {q for p in front for q in facing[p] if ctrl[q] == target}
         depth = self.bfs(at_line, target_land) if at_line else {}
-        deep = {p: v for p, v in vps.items() if p in body and depth.get(p, 9) >= 2}
-        fast_route = self.fast_routes(deep or {p: v for p, v in vps.items() if p in body}, enemy_land, foe_power)
+        deep = {p: v for p, v in worth.items() if p in body and depth.get(p, 9) >= 2}
+        fast_route = self.fast_routes(deep or {p: v for p, v in worth.items() if p in body}, enemy_land, foe_power)
 
         def route_from(p, r=route):
             """Best route cost to an objective starting with an attack out of our province P."""
@@ -288,7 +301,7 @@ class Planner:
             fcand = breach or fscore
             fpts = [p for p, (k, _) in self.points.items() if k == "fast" and comp.get(p) == c]
             for b in fpts:  # drop a point that is no longer near the best route
-                if b not in fcand or fcand[b] > min(fcand.values()) * s.support_route:
+                if b not in fcand or fcand[b] > min(fcand.values()) * s.point_drop:
                     del self.points[b]
             fpts = [b for b in fpts if b in self.points]
             if n_fast and not fpts and fcand:
@@ -394,6 +407,35 @@ class Planner:
             fast_targets = sorted({t for p in fast_at for t in self.nb(p) if ctrl[t] in hostile and t in fast_route},
                                   key=fast_route.get)
             attack(fast_targets, self.is_fast, s.fast_margin, s.fast_min_org, False, "fast_attacks", s.fast_cap)
+            # exploitation: a ready fast division not in a fight drives into empty enemy land, each to its own target
+            empty = {p for p in enemy_land if foe_power[p] == 0}
+            passable = own | empty
+            claimed = {d.dest for d in mine if d.moving and d.dest in empty}
+            drivers = [d for d in fast if d.id not in attacking and d.province in passable
+                       and not (d.moving and d.dest in land and ctrl[d.dest] in hostile)
+                       and self.can_attack(d, s.fast_min_org)]
+            for d in sorted(drivers, key=power, reverse=True):
+                t = self.drive.get(d.id)
+                if t not in empty or t in claimed:
+                    dist = {d.province: 0}
+                    q = collections.deque([d.province])
+                    while q:
+                        p = q.popleft()
+                        if dist[p] < s.exploit_reach:
+                            for n in self.nb(p):
+                                if n not in dist and n in passable:
+                                    dist[n] = dist[p] + 1
+                                    q.append(n)
+                    cands = [((1 + value(x)) / (1 + dist[x]), x) for x in dist if x in empty and x not in claimed]
+                    t = max(cands)[1] if cands else None
+                if t is None:
+                    self.drive.pop(d.id, None)
+                    continue
+                self.drive[d.id] = t
+                claimed.add(t)
+                orders[d.id] = t
+                attacking.add(d.id)
+                report["drives"] += 1
             # infantry: local attacks where clearly stronger; weak, open, on-route provinces first
             cands = {t for p in front for t in facing[p] if ctrl[t] == target}
             ranked = sorted(cands, key=lambda t: (foe_power[t] + 10) * self.terrain(t) + route.get(t, 99) / 10)
@@ -417,7 +459,11 @@ class Planner:
 
         # --- everyone else: fill the posts, nearest first, keeping last step's posts ---------------------------
         unposted = 0
-        for group, demand in ((line, line_demand), (fast, fast_demand)):
+        # at war a worn-out fast division rests where it stands (on our land) instead of walking back to the breach
+        resting = {d.id for d in fast if at_war and d.province in own and d.id not in attacking
+                   and not self.can_attack(d, s.fast_min_org)}
+        report["resting"] = len(resting)
+        for group, demand in ((line, line_demand), ([d for d in fast if d.id not in resting], fast_demand)):
             unposted += self._assign(group, demand, own, attacking, ctrl, hostile, orders, zones)
         for did, p in orders.items():
             if did not in attacking:

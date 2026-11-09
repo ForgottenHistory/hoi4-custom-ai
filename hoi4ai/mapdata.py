@@ -1,5 +1,8 @@
 """The map as the game builds it from its files (through the active mods): provinces, neighbours, states.
 
+Railways (map/railways.txt) and supply hubs (map/supply_nodes.txt) give each province its best railway level and
+hub level, as the map starts (the game builds more in play).
+
 Neighbours come from provinces.bmp (provinces whose pixels touch, including across the east-west wrap) plus
 adjacencies.csv (straits and other crossings; 'impassable' entries remove a border). Built once per set of input
 files and cached in .cache/ next to this package.
@@ -16,7 +19,7 @@ import numpy as np
 from .gamefiles import GameFiles
 
 CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cache")
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 
 
 class Province:
@@ -42,11 +45,13 @@ class State:
 
 class Map:
     """provinces {id: Province}; neighbours {id: {id: Edge kind}}; border {(a, b): shared pixel edges, a < b};
-    rivers {(a, b): 1 small river | 2 large river along that border, a < b}; states {id: State}."""
+    rivers {(a, b): 1 small river | 2 large river along that border, a < b}; states {id: State};
+    rails {id: best railway level through it}; hubs {id: supply hub level}."""
 
     def __init__(self):
         self.provinces, self.neighbours, self.border, self.states = {}, {}, {}, {}
         self.rivers = {}
+        self.rails, self.hubs = {}, {}
         self.width = self.height = 0
         self.sources = {}
 
@@ -193,6 +198,33 @@ def _read_adjacencies(path):
     return out
 
 
+def _read_rails(path):
+    """map/railways.txt: one railway per line, "LEVEL COUNT PROVINCE.." -> {province: best level}."""
+    out = {}
+    if not path:
+        return out
+    for line in open(path, encoding="latin-1"):
+        p = _strip_comments(line).split()
+        if len(p) < 3 or not all(x.isdigit() for x in p):
+            continue
+        level = int(p[0])
+        for q in p[2:2 + int(p[1])]:
+            out[int(q)] = max(out.get(int(q), 0), level)
+    return out
+
+
+def _read_hubs(path):
+    """map/supply_nodes.txt: "LEVEL PROVINCE" per line -> {province: level}."""
+    out = {}
+    if not path:
+        return out
+    for line in open(path, encoding="latin-1"):
+        p = _strip_comments(line).split()
+        if len(p) >= 2 and p[0].isdigit() and p[1].isdigit():
+            out[int(p[1])] = max(out.get(int(p[1]), 0), int(p[0]))
+    return out
+
+
 _STATE_ID = re.compile(r"\bid\s*=\s*(\d+)")
 _STATE_NAME = re.compile(r'\bname\s*=\s*"?([\w.\-]+)"?')
 _STATE_PROVS = re.compile(r"\bprovinces\s*=\s*\{([^}]*)\}")
@@ -251,7 +283,8 @@ def load(files=None, use_cache=True, verbose=False):
         if not src[k]:
             raise FileNotFoundError("map file for %r not found (%s)" % (k, files.describe()))
     state_files = list(files.listdir("history/states", ".txt").values())
-    key = _cache_key(files, [p for p in src.values() if p] + state_files)
+    extra = {"rails": files.find("map/railways.txt"), "hubs": files.find("map/supply_nodes.txt")}
+    key = _cache_key(files, [p for p in src.values() if p] + [p for p in extra.values() if p] + state_files)
     cache = os.path.join(CACHE_DIR, "map_%s.pkl" % key)
     if use_cache and os.path.exists(cache):
         with open(cache, "rb") as f:
@@ -300,6 +333,7 @@ def load(files=None, use_cache=True, verbose=False):
                 m.neighbours.get(x, {}).pop(y, None)
         else:
             link(a, b, kind)
+    m.rails, m.hubs = _read_rails(extra["rails"]), _read_hubs(extra["hubs"])
     m.states = _read_states(files)
     for s in m.states.values():
         for pid in s.provinces:
