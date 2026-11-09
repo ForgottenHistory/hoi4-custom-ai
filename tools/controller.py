@@ -84,7 +84,7 @@ class Log:
 
     COLS = ["date", "at_war", "enemies", "divisions", "fast", "front", "main_front", "fast_points",
             "support_points", "fast_attacks", "fast_attacks_divisions", "attacks", "attacks_divisions", "retreats",
-            "unposted", "orders", "moves", "failed", "our_power", "enemy_power",
+            "unposted", "short_of_supply", "max_stack", "orders", "moves", "failed", "our_power", "enemy_power",
             "target_provinces", "taken", "goal", "capitulated", "ms"]
 
     def tick(self, row):
@@ -182,7 +182,7 @@ def main():
             log.tick(row)
             print(f"{row['date']} war={row['at_war']} divs={rep['divisions']} front={rep['front']} "
                   f"fast={rep['fast']} attacks={rep.get('fast_attacks', 0)}+{rep.get('attacks', 0)} moves={sent} fail={failed} "
-                  f"taken={taken}/{len(target_land)} ({row['ms']} ms)")
+                  f"taken={taken}/{len(target_land)} short_of_supply={rep['short_of_supply']} ({row['ms']} ms)")
             if a.once:
                 for did, prov in list(orders.items())[:15]:
                     d = mine.get(did)

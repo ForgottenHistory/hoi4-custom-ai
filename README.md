@@ -64,6 +64,8 @@ and live data from the running game's memory.
   route's cost counts terrain (plains 1, urban 1.5, forest and hills 2, marsh and jungle 3, mountains 4),
   defenders, and rivers crossed; a route ends at the victory point with the lowest cost plus 8 / (1 + VP / 5),
   so bigger victory points pull harder (+1 small, +2 large; attacks across them want 25% / 50% more strength).
+  No more than 6 divisions are planned per province: a bigger force spreads to the provinces behind its
+  point, nearest first (big stacks starve: supply, attrition).
   Infantry support points only go on routes at most 1.2x the best; otherwise the infantry stands behind the
   fast army. Each connected piece of the territory our front runs along (our own, our subjects' and faction
   members') is planned on its own.
@@ -87,7 +89,8 @@ provinces with direct moves.
 ## Layouts used (game 1.19.x)
 
 - Division (`CArmy`, handle type 51; the handle's object is the full object + 0x10): owner +0x1c8, province
-  `*(+0x1e0)+0xa4`, main sub-unit type `*(+0x128)+0x68` (std::string), destination +0x2a4 (0 = none), order `*(+0xb0)+0xc`, organisation +0x20, strength +0x30 (fixed point, 100000 = 100%),
+  `*(+0x1e0)+0xa4`, main sub-unit type `*(+0x128)+0x68` (std::string), destination +0x2a4 (0 = none), probably supply level +0x490 (100000 = full;
+  72727 in a starving 23-division stack), order `*(+0xb0)+0xc`, organisation +0x20, strength +0x30 (fixed point, 100000 = 100%),
   template name `*(+0x3a8)+0x20`. Full object: path at +0x2c0, destination +0x2b4.
 - Order (front / battle plan / army, type 53): owner +0x3c. Theatre (type 67): no owner field; its armies'
   list at +0x80 (owner of the first), divisions' list at +0x68.

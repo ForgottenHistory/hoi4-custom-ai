@@ -43,6 +43,7 @@ class Settings:
     support_every = 10         # one infantry support point per this many reserve infantry divisions
     max_support = 4
     support_route = 1.2        # support points only on routes at most this much dearer than the best
+    max_stack = 6              # divisions per province we plan for (more starve: supply, attrition)
     axis_tie = 1.15            # fast army starts within this much of the best route compete on how they split the enemy
     sector_size = 3            # front provinces a force spreads over (its point and best neighbours)
     keep = 8                   # planning steps a chosen point is kept while it stays on the front
@@ -121,6 +122,26 @@ class Planner:
                 else:
                     right += f
         return min(left, right)
+
+    def place(self, b, n, score, own, load, demand):
+        """Put N divisions at point B: its sector first, then the provinces behind it, nearest first, at most
+        max_stack per province counting what LOAD already has there. Adds to DEMAND; returns the provinces."""
+        sec = self.sector(b, score)
+        order = list(sec)
+        dist = self.bfs(sec, own)
+        order += sorted((q for q in dist if q not in sec), key=lambda q: (dist[q], score.get(q, math.inf)))
+        used = []
+        for q in order:
+            if n <= 0:
+                break
+            take = min(n, self.s.max_stack - load.get(q, 0))
+            if take <= 0:
+                continue
+            demand[q] = demand.get(q, 0) + take
+            load[q] = load.get(q, 0) + take
+            used.append(q)
+            n -= take
+        return used
 
     def sector(self, b, score):
         """B and its best-scoring neighbours on the same front (SCORE: lower is better)."""
@@ -226,12 +247,11 @@ class Planner:
                 self.points[best] = ("fast", s.keep)
                 fpts = [best]
             used = set()
+            load = dict(line_demand)  # holders already stand there
             for b in fpts:
-                sec = self.sector(b, fscore)
-                sectors[b] = ("fast", sec)
-                used.update(sec)
-                for i, q in enumerate(sec):
-                    fast_demand[q] = fast_demand.get(q, 0) + n_fast // len(sec) + (1 if i < n_fast % len(sec) else 0)
+                placed = self.place(b, math.ceil(n_fast / len(fpts)), fscore, own, load, fast_demand)
+                sectors[b] = ("fast", placed)
+                used.update(self.sector(b, fscore))
             # infantry support points: along the next best routes of the main axis, apart from each other and
             # from the fast sector
             score = fscore or score
@@ -256,10 +276,8 @@ class Planner:
             if spts and reserves:
                 per = math.ceil(reserves / len(spts))
                 for b in spts:
-                    sec = self.sector(b, score)
-                    sectors.setdefault(b, ("support", sec))
-                    for i, q in enumerate(sec):
-                        line_demand[q] = line_demand.get(q, 0) + per // len(sec) + (1 if i < per % len(sec) else 0)
+                    placed = self.place(b, per, score, own, load, line_demand)
+                    sectors.setdefault(b, ("support", placed))
 
         self.view = dict(front=front, main=main, goal=goal, foe_power=dict(foe_power), component=comp,
                          route=fast_route, near_route=route, fast_route=fast_route, objectives=vps, body=body,
@@ -329,7 +347,9 @@ class Planner:
                       fast_points=sum(1 for k, _ in self.points.values() if k == "fast"),
                       support_points=sum(1 for k, _ in self.points.values() if k == "support"),
                       unposted=unposted, enemy_power=round(sum(foe_power.values()), 1),
-                      our_power=round(sum(power(d) for d in mine), 1), goal=goal or 0)
+                      our_power=round(sum(power(d) for d in mine), 1), goal=goal or 0,
+                      short_of_supply=sum(1 for d in mine if getattr(d, "supply", 100000) < 95000),
+                      max_stack=max(collections.Counter(d.province for d in mine).values(), default=0))
         return orders, report
 
     def _assign(self, group, demand, own, attacking, ctrl, hostile, orders):

@@ -4,17 +4,18 @@ import os
 from hoi4bridge import send
 
 # CArmy (handle 51) fields: owner, province, destination (0 = none), current organisation, strength, template name,
-# main sub-unit type (the one its map counter shows: CSubUnitDefinition at +0x128, name at +0x68).
+# main sub-unit type (the one its map counter shows: CSubUnitDefinition at +0x128, name at +0x68), and +0x490,
+# probably its supply level (100000 = fully supplied; 72727 in a starving 23-division stack, 100000 elsewhere).
 # Fixed point x1000; strength 100000 = 100%.
-FIELDS = "c1c8 i1e0.a4 i2a4 i20 i30 s3a8.20 s128.68"
+FIELDS = "c1c8 i1e0.a4 i2a4 i20 i30 s3a8.20 s128.68 i490"
 
 
 class Division:
-    __slots__ = ("id", "owner", "province", "dest", "org", "strength", "template", "unit")
+    __slots__ = ("id", "owner", "province", "dest", "org", "strength", "template", "unit", "supply")
 
-    def __init__(self, did, owner, province, dest, org, strength, template, unit=""):
+    def __init__(self, did, owner, province, dest, org, strength, template, unit="", supply=100000):
         self.id, self.owner, self.province, self.dest = did, owner, province, dest
-        self.org, self.strength, self.template, self.unit = org, strength, template, unit
+        self.org, self.strength, self.template, self.unit, self.supply = org, strength, template, unit, supply
 
     @property
     def moving(self):
@@ -44,7 +45,7 @@ class Snapshotter:
                     continue
                 try:
                     out.append(Division(int(p[0]), p[1], int(p[2]), int(p[3]), int(p[4]), int(p[5]), p[6],
-                                        p[7] if len(p) > 7 else ""))
+                                        p[7] if len(p) > 7 else "", int(p[8]) if len(p) > 8 else 100000))
                 except ValueError:
                     continue
         # strength 0 and org 0: at sea or deploying, not on the map
