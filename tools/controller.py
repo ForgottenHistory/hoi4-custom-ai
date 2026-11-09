@@ -653,6 +653,11 @@ def main():
     finally:
         if rec:
             print(send("bridge.cmdrec off")[0])
+        if not a.no_takeover and not a.dry_run:  # the country's army is the game's (or the player's) again
+            takeover.release(tag)
+            if protected:
+                send("bridge.protect remove " + " ".join(map(str, protected)))
+            print("released", tag)
 
 
 if __name__ == "__main__":
