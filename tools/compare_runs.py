@@ -126,11 +126,13 @@ def analyse(run, m, names, fast_units, cities):
         ours = [x for x in run.divs[d] if x["owner"] == tag]
         theirs = [x for x in run.divs[d] if x["owner"] == target]
         front = {p for p, c in ctrl.items() if c == me and any(n in hostile for n in m.neighbours.get(p, {}))}
-        attacking = [x for x in ours if int(x["dest"]) in hostile and int(x["dest"]) in m.neighbours.get(
-            int(x["province"]), {})]
-        attacked = collections.Counter(int(x["dest"]) for x in attacking)
+        # where each division steps next: the next province on its path (battle plans move divisions without a
+        # destination); older recordings have only the destination of a move order
+        step = lambda x: int(x["next"]) if "next" in x else (int(x["dest"]) if x["dest"] != x["province"] else 0)
+        attacking = [x for x in ours if step(x) in hostile and step(x) in m.neighbours.get(int(x["province"]), {})]
+        attacked = collections.Counter(step(x) for x in attacking)
         fast = [x for x in ours if x["unit"] in fast_units]
-        moving = lambda x: x["dest"] not in ("0", x["province"])
+        moving = lambda x: step(x) != 0
         idle = [x for x in ours if not moving(x) and int(x["province"]) not in front]
         row = dict(day=round(days(d), 2), taken=taken, enemy_divisions=len(theirs), divisions=len(ours),
                    attacking=len(attacking) / max(1, len(ours)), attacks=len(attacked),
@@ -166,6 +168,7 @@ def analyse(run, m, names, fast_units, cities):
                                                    "short_supply", "idle", "fast_depth", "fast_attacking",
                                                    "fast_strength")},
         "commands": dict(commands.most_common(15)), "series": series,
+        "paths": any("next" in x for rows in run.divs.values() for x in rows[:1]),
     }
 
 
@@ -200,6 +203,10 @@ def main():
                   "fast_strength": "fast strength %"}
         for k, name in labels.items():
             line(name, [f"{r['means'][k]:.2f}" for r in ok])
+        old = [r["label"] for r in ok if not r["paths"]]
+        if old:
+            print("(recorded before paths: attacks and idle count only move orders, not battle plans:",
+                  ", ".join(old) + ")")
         print("\nprovinces taken by day:")
         for day in range(0, int(max(r["days"] for r in ok)) + 2, 2):
             vals = []

@@ -4,7 +4,7 @@ A recording is a folder:
   meta.json      who recorded what: label, country, target, country ids -> tags, when it started
   status.tsv     per step: date, at war with the target, enemies, target capitulated
   divisions.tsv  per step: every division of the country and of its enemies (place, destination, organisation,
-                 strength, supply, army, main unit, template)
+                 strength, supply, army, main unit, template, next province on its path: 0 if not moving)
   control.tsv    who controls each province: every province at the first step, then only the changes
 Steps are in-game times; the caller decides how often (tools/battlerec.py: every few in-game hours).
 """
@@ -27,7 +27,7 @@ class BattleRecorder:
                       open(meta, "w", encoding="utf-8"), indent=1)
         self._status = self._open("status.tsv", "date\tat_war\tenemies\tcapitulated")
         self._divs = self._open("divisions.tsv", "date\tid\towner\tprovince\tdest\torg\tstrength\tsupply\tarmy"
-                                                 "\tunit\ttemplate")
+                                                 "\tunit\ttemplate\tnext")
         self._ctrl = self._open("control.tsv", "date\tprovince\tcontroller")
         self._last = None
         self.tag = tag
@@ -49,7 +49,7 @@ class BattleRecorder:
         for d in divs:
             if d.owner in keep:
                 self._divs.write(f"{date}\t{d.id}\t{d.owner}\t{d.province}\t{d.dest}\t{d.org}\t{d.strength}"
-                                 f"\t{d.supply}\t{d.army}\t{d.unit}\t{d.template}\n")
+                                 f"\t{d.supply}\t{d.army}\t{d.unit}\t{d.template}\t{d.next}\n")
         ctrl = np.asarray(controller)
         changed = np.arange(len(ctrl)) if self._last is None else np.nonzero(ctrl != self._last)[0]
         for p in changed:
