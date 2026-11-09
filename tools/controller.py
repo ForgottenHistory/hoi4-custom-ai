@@ -95,6 +95,37 @@ def keep_in_group(gid, army_ids):
     return send(f"bridge.army assign {gid} " + " ".join(map(str, missing)))[0]
 
 
+def keep_leaders(tag, gid, army_ids, cache):
+    """Every army keeps a general and the army group a field marshal. Nobody is a field marshal at the start; the game
+    promotes some later (in 1939 Rundstedt, Kluge, Kesselring), which takes them out of their armies. So: a promoted
+    field marshal gets the army group, an army without a general (or led by a field marshal) gets the best free one.
+    ARMY_IDS in priority order (the fast army first). Returns lines describing what changed."""
+    lead = leaders_mod.load(tag, os.path.join(cache, "leaders.tsv"))
+    by_addr = {_object_address(4713, l.id): l for l in lead}
+    current = {a: by_addr.get(_pointer_at(_object_address(53, a) + 0x88)) for a in army_ids}
+    used = {l.id for l in current.values() if l}
+    free = sorted((l for l in lead if not l.field_marshal and l.id not in used), key=lambda l: (-l.attack, -l.planning))
+    lines = []
+    for a in army_ids:
+        l = current[a]
+        if l and not l.field_marshal:
+            continue
+        if not free:
+            break
+        g = free.pop(0)
+        r = send(f"bridge.army leader {a} {g.id}")[0]
+        lines.append(f"army {a}: general {g.name} (attack {g.attack})" + ("" if r.startswith("OK") else f": {r}"))
+    if gid:
+        l = by_addr.get(_pointer_at(_object_address(53, gid) + 0x88))
+        marshals = sorted((x for x in lead if x.field_marshal), key=lambda x: (-x.attack, -x.planning))
+        if marshals and not (l and l.field_marshal):
+            fm = marshals[0]
+            r = send(f"bridge.army leader {gid} {fm.id}")[0]
+            lines.append(f"army group {gid}: field marshal {fm.name} (attack {fm.attack})"
+                         + ("" if r.startswith("OK") else f": {r}"))
+    return lines
+
+
 def build_structure(m, provinces, divs, tag, me, tgt, fast_units, friend_ids, cache):
     """Build the armies, generals and the army group (hoi4ai/organize.py) with bridge.army.
     Returns (summary lines, army group id or 0, the group's army ids, {division id: army id})."""
@@ -205,6 +236,8 @@ def main():
         group_id, group_armies, membership = a.group[0], a.group[1:], {}
     else:
         group_id, group_armies, membership = 0, [], {}
+    army_order = list(dict.fromkeys(membership.values()))  # creation order: the fast army first
+    leader_day = None
     ticks = 0
     can_stop = send("bridge.stop")[0].startswith("FAIL usage: bridge.stop")
     print("stopping attacks with", "bridge.stop" if can_stop else "a move back to the division's own province")
@@ -230,6 +263,10 @@ def main():
                 r = keep_in_group(group_id, group_armies)
                 if r:
                     print("army group, put back:", r)
+            if army_order and not a.dry_run and now.date() != leader_day:  # once a day: generals and field marshal
+                leader_day = now.date()
+                for line in keep_leaders(tag, group_id, army_order, os.path.join(REPO, ".cache")):
+                    print(line)
             provinces.refresh()
             divs = snap.take()
             enemy_tags = enemies_of(tag)
