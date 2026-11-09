@@ -13,6 +13,7 @@ sent). Stops with Ctrl+C, or when the target capitulates.
 import argparse
 import collections
 import datetime
+import json
 import os
 import re
 import time
@@ -198,6 +199,32 @@ class Log:
         self.moves.write(f"{when}\t{d.id}\t{d.province}\t{to}\t{kind}\t{result}\n")
 
 
+def _alive(pid):
+    """Is process PID running (Windows)?"""
+    import ctypes
+    k32 = ctypes.windll.kernel32
+    h = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return False
+    code = ctypes.c_ulong()
+    ok = k32.GetExitCodeProcess(h, ctypes.byref(code))
+    k32.CloseHandle(h)
+    return bool(ok) and code.value == 259  # STILL_ACTIVE
+
+
+def _lock():
+    """Only one controller at a time: two fight over the same armies."""
+    path = os.path.join(REPO, ".cache", "controller.pid")
+    try:
+        pid = int(open(path).read().strip())
+        if pid != os.getpid() and _alive(pid):
+            raise SystemExit(f"another controller is running (pid {pid}); stop it first")
+    except (OSError, ValueError):
+        pass
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    open(path, "w").write(str(os.getpid()))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default="GER")
@@ -219,6 +246,8 @@ def main():
                     help="let the game form armies and pick generals (their buffs); fronts and plans stay blocked")
     ap.add_argument("--no-takeover", action="store_true", help="don't block the game AI's army commands")
     a = ap.parse_args()
+    if not a.dry_run:
+        _lock()
     tag, target = a.tag.upper(), a.target.upper()
 
     m = mapdata.load(verbose=True)
@@ -253,7 +282,20 @@ def main():
         army_order = group_armies
     leader_day = None
     planned, executed, zone_specs = set(), False, []
-    if a.plans and group_armies and not a.dry_run:
+    state_path = os.path.join(REPO, ".cache", "plans_state.json")
+    if a.plans and group_armies and not a.dry_run and os.path.exists(state_path):
+        # a restart: keep the plans the game holds (redrawing them would throw away the planning built up)
+        from hoi4ai.memory import Process
+        st = json.load(open(state_path, encoding="utf-8"))
+        proc = Process()
+        if st.get("group") == group_armies and all(plans.lines(proc, aid) for aid in st["planned"]):
+            planned = set(st["planned"])
+            zone_specs = [(aid, {int(k): v for k, v in b.items()}, lo, hi) for aid, b, lo, hi in st["specs"]]
+            # the same border dict for armies on the same border (zones() groups by it)
+            same = {}
+            zone_specs = [(aid, same.setdefault(tuple(sorted(b.items())), b), lo, hi) for aid, b, lo, hi in zone_specs]
+            print(f"keeping the battle plans of armies {sorted(planned)}")
+    if a.plans and group_armies and not a.dry_run and not planned:
         from hoi4ai.memory import Process
         provinces.refresh()
         divs0 = snap.take()
@@ -308,6 +350,9 @@ def main():
             if not a.execute:  # the game keeps the plans (planning builds) but leaves the moving to us
                 for line in plans.cohesion(sorted(planned)):
                     print(line)
+            json.dump({"group": group_armies, "planned": sorted(planned),
+                       "specs": [(aid, {str(k): v for k, v in b.items()}, lo, hi) for aid, b, lo, hi in zone_specs]},
+                      open(state_path, "w", encoding="utf-8"))
         else:
             print("battle plans: no border with", target, "found" if not secs else "", "or no victory points")
     ticks = 0
@@ -339,8 +384,14 @@ def main():
                 leader_day = now.date()
                 for line in keep_leaders(tag, group_id, army_order, os.path.join(REPO, ".cache")):
                     print(line)
-            provinces.refresh()
-            divs = snap.take()
+            try:
+                provinces.refresh()
+                divs = snap.take()
+            except (OSError, BridgeError, BridgeUnavailable) as e:
+                print("snapshot:", e)
+                last = None
+                time.sleep(1)
+                continue
             enemy_tags = enemies_of(tag)
             enemy_ids = [ids[t] for t in enemy_tags if t in ids]
             friend_ids = [ids[t] for t in friends_of(tag) if t in ids]

@@ -1,5 +1,6 @@
 """Every division in the game, from one bridge.snap (~15 ms in the game, read back from a file)."""
 import os
+import time
 
 from hoi4bridge import send
 
@@ -37,19 +38,28 @@ class Snapshotter:
     def take(self):
         send("bridge.snap reset " + self.path)
         send("bridge.snap now 51 class=CArmy " + FIELDS)
-        out = []
-        with open(self.path, encoding="utf-8", errors="replace") as f:
-            for line in f:
+        for attempt in range(20):  # the game may still hold the file for a moment
+            try:
+                with open(self.path, encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+                break
+            except PermissionError:
+                time.sleep(0.05)
+        else:
+            raise PermissionError(self.path)
+        out = {}
+        if True:
+            for line in text.splitlines():
                 if line.startswith("#"):
                     continue
                 p = line.rstrip("\n").split("\t")
                 if len(p) < 7:
                     continue
-                try:
-                    out.append(Division(int(p[0]), p[1], int(p[2]), int(p[3]), int(p[4]), int(p[5]), p[6],
-                                        p[7] if len(p) > 7 else "", int(p[8]) if len(p) > 8 else 100000,
-                                        int(p[9]) if len(p) > 9 and p[9].lstrip("-").isdigit() else 0))
+                try:  # by id: a snapshot written twice (another client switching the snapshot file) counts once
+                    out[int(p[0])] = Division(int(p[0]), p[1], int(p[2]), int(p[3]), int(p[4]), int(p[5]), p[6],
+                                              p[7] if len(p) > 7 else "", int(p[8]) if len(p) > 8 else 100000,
+                                              int(p[9]) if len(p) > 9 and p[9].lstrip("-").isdigit() else 0)
                 except ValueError:
                     continue
         # strength 0 and org 0: at sea or deploying, not on the map
-        return [d for d in out if d.strength or d.org]
+        return [d for d in out.values() if d.strength or d.org]
