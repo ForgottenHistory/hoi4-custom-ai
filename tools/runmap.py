@@ -161,7 +161,7 @@ def main():
             d.regular_polygon((xx + 8, yy + 8, 8), 5, fill=col, outline=(0, 0, 0))
         d.text((xx + 22, yy + 8), text, fill=(30, 30, 30), font=f_small, anchor="lm")
         xx += 30 + int(d.textlength(text, font=f_small)) + 18
-    path = a.out or os.path.join(REPO, "recordings", "heatmaps", f"runs_day{a.day:g}.png")
+    path = os.path.abspath(a.out or os.path.join(REPO, "recordings", "heatmaps", f"runs_day{a.day:g}.png"))
     os.makedirs(os.path.dirname(path), exist_ok=True)
     out.save(path)
     print(path)
