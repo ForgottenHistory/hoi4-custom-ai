@@ -293,7 +293,10 @@ def main():
         from hoi4ai.memory import Process
         st = json.load(open(state_path, encoding="utf-8"))
         proc = Process()
-        if st.get("group") == group_armies and all(plans.lines(proc, aid) for aid in st["planned"]):
+        # every army still holds its lines before the war; once fighting, the game uses lines up and splits them,
+        # so any line left is enough (redrawing would throw away the planning)
+        held = [bool(plans.lines(proc, aid)) for aid in st["planned"]]
+        if st.get("group") == group_armies and (all(held) or (any(held) and target in enemies_of(tag))):
             planned = set(st["planned"])
             zone_specs = [(aid, {int(k): v for k, v in b.items()}, lo, hi) for aid, b, lo, hi in st["specs"]]
             # the same border dict for armies on the same border (zones() groups by it)

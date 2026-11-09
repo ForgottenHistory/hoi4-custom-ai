@@ -13,7 +13,7 @@ an army group's leader: its "remove leader" routine unassigns them within hours)
 import os
 import re
 
-from hoi4bridge import send, trigger
+from hoi4bridge import send
 
 FIELDS = "c120 ie7c if58 if68 if78 if88 bde8 s40 s20"
 GENERAL = 1
@@ -105,20 +105,22 @@ def conditions(files=None):
 
 def usable(tag, leaders, files=None):
     """The LEADERS the game lets command now: each role's visible / available conditions, checked by the game in
-    the country's scope (a generals list shows only these; the game unassigns the others within a day)."""
+    the country's scope (a generals list shows only these; the game unassigns the others within a day). All checks
+    go in one batch; a condition the game can't evaluate doesn't rule a leader out."""
     conds = conditions(files)
-    out = []
-    for l in leaders:
+    checks, owner = [], []
+    for k, l in enumerate(leaders):
         role = "field_marshal" if l.field_marshal else "corps_commander"
-        blocks = conds.get(l.key, {}).get(role, [])
-        ok = True
-        for b in blocks:
-            try:
-                if not trigger(f"{tag} = {{ {' '.join(b.split())} }}"):  # one line: the bridge reads lines
-                    ok = False
-                    break
-            except Exception:
-                pass  # a condition the game can't check here: don't rule the leader out for it
-        if ok:
-            out.append(l)
-    return out
+        for b in conds.get(l.key, {}).get(role, []):
+            checks.append(f"eval_trigger {tag} = {{ {' '.join(b.split())} }}")  # one line: the bridge reads lines
+            owner.append(k)
+    bad = set()
+    if checks:
+        try:
+            replies = send(*checks)
+        except Exception:
+            replies = []
+        for k, r in zip(owner, replies):
+            if r.rstrip().endswith("no"):
+                bad.add(k)
+    return [l for k, l in enumerate(leaders) if k not in bad]
