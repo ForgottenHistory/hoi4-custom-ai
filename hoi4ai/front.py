@@ -76,6 +76,8 @@ class Settings:
     width_slack = 1.25         # attackers fill the battle's combat width up to this much (a few in reserve
                                # replace the worn-out); attacking from more provinces widens the battle
     fast_reach = 6.0           # fast army: how fast a victory point's pull fades with route cost
+    fast_cutoff = 6.0          # ... and a point pulls nothing beyond this many fast_reach (e^-6)
+    fast_objectives = 150      # at most this many points pull the fast army (the most valuable)
     fast_foe_weight = 2.0      # fast army: defenders count this much more on its routes (tanks go around strength)
     support_every = 10         # one infantry support point per this many reserve infantry divisions
     max_support = 4
@@ -202,10 +204,10 @@ class Planner:
     def terrain(self, p):
         return TERRAIN_COST.get(self.m.provinces[p].terrain, 2.0)
 
-    def routes(self, sources, allowed, foe_power, foe_weight=1.0):
+    def routes(self, sources, allowed, foe_power, foe_weight=1.0, max_cost=math.inf):
         """Cost from each province in ALLOWED to the cheapest of SOURCES ({province: starting cost}) (Dijkstra),
         counting each province's terrain and defenders on the way (the province itself included) and the
-        rivers crossed."""
+        rivers crossed. Provinces beyond MAX_COST are left out (not searched)."""
         def step(p):
             return self.terrain(p) * (1.0 + foe_weight * foe_power.get(p, 0.0) / FULL_DIVISION)
         dist = {g: c0 + step(g) for g, c0 in sources.items() if g in allowed}
@@ -215,6 +217,8 @@ class Planner:
             c, p = heapq.heappop(heap)
             if c > dist.get(p, math.inf):
                 continue
+            if c > max_cost:
+                break
             for n in self.nb(p):
                 if n in allowed:
                     nc = c + step(n) + RIVER_COST[self.m.river(n, p)]
@@ -227,12 +231,17 @@ class Planner:
         """The fast army's cost from each enemy province: a soft minimum over all OBJECTIVES ({province: victory
         points}) of the route cost there, each weighted by its share of the points. Many cheap, lightly held points
         (an open rear) pull as much as one big defended city; defenders count fast_foe_weight times."""
+        if len(objectives) > self.s.fast_objectives:  # a big country: its most valuable points only
+            objectives = dict(sorted(objectives.items(), key=lambda kv: -kv[1])[:self.s.fast_objectives])
         total = sum(objectives.values())
         if not total:
             return {}
         pull = collections.defaultdict(float)
         for q, v in objectives.items():
-            for t, c in self.routes({q: 0.0}, allowed, foe_power, self.s.fast_foe_weight).items():
+            # beyond fast_cutoff x fast_reach a point's pull is negligible (e^-6): don't search there (a big
+            # country has hundreds of points; searching each over all its land took seconds)
+            for t, c in self.routes({q: 0.0}, allowed, foe_power, self.s.fast_foe_weight,
+                                    self.s.fast_cutoff * self.s.fast_reach).items():
                 pull[t] += v / total * math.exp(-c / self.s.fast_reach)
         return {t: -self.s.fast_reach * math.log(a) for t, a in pull.items() if a > 0}
 
