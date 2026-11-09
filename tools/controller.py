@@ -31,7 +31,10 @@ MONTHS = {m: i for i, m in enumerate(["january", "february", "march", "april", "
 
 def game_time(tag):
     """In-game datetime, from ' 22:00, 18 August, 1939'."""
-    text = query(f'{tag} = {{ log = "[GetDateText]" }}')[0].strip()
+    lines = query(f'{tag} = {{ log = "[GetDateText]" }}')
+    if not lines:
+        raise ValueError("no game running (main menu or loading?)")
+    text = lines[0].strip()
     hm, day_month, year = [x.strip() for x in text.split(",")]
     day, month = day_month.split()
     hour = int(hm.split(":")[0])  # the game shows midnight as 24:00 of the day before
