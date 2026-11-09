@@ -17,7 +17,7 @@ import re
 import time
 
 import _bridge  # noqa: F401
-from hoi4bridge import BridgeError, query, send, trigger
+from hoi4bridge import BridgeError, BridgeUnavailable, query, send, trigger
 from hoi4ai import leaders as leaders_mod, mapdata, organize, units
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.front import Planner
@@ -193,7 +193,7 @@ def main():
         while True:
             try:
                 now = game_time(tag)
-            except (BridgeError, ValueError) as e:
+            except (BridgeError, BridgeUnavailable, ValueError) as e:
                 print("date:", e)
                 time.sleep(2)
                 continue
