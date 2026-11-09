@@ -1,7 +1,8 @@
 """Army planning, after how a player runs an offensive (Germany vs Poland, 1939):
 
 - Division roles come from their templates' stats (hoi4ai/templates.py): attack power is organisation x strength
-  x soft attack against the main infantry template's, and x the template's attack modifier in the target's terrain.
+  x soft attack against its speed class (the main infantry, or the fast divisions' average), and x the template's
+  attack modifier in the target's terrain.
   So mountaineers are picked first to attack hills and mountains, tanks avoid forests, cities and rivers, and
   weak divisions (security divisions: no support companies) are the ones left holding while the others attack.
 - Infantry holds the line: one division on every province facing the enemy. Half the rest stands behind the
@@ -83,6 +84,7 @@ class Settings:
 class Planner:
     def __init__(self, m, me, fast_units=(), settings=None, armored_units=(), stats=None):
         self.m, self.me = m, me
+        self.stats, self.ref_soft = {}, {}
         self.set_stats(stats or {})
         self.fast_units = set(fast_units)
         self.armored_units = set(armored_units)
@@ -128,23 +130,30 @@ class Planner:
         return p
 
     def set_stats(self, stats):
-        """STATS: {template name: {"soft_attack", "terrain": {terrain: {"attack": modifier}}}} (templates.country).
-        Soft attack counts against the template most of the slow divisions use (the main infantry)."""
+        """STATS: {template name: {"soft_attack", "maximum_speed", "terrain": {terrain: {"attack": modifier}}}}
+        (templates.country). Soft attack counts against its speed class (fast: 6 km/h or more): the most used slow
+        template (the main infantry), or the fast divisions' average, so each group keeps the strength its margins
+        were set for and only the spread inside it changes."""
         self.stats = stats
-        slow = [t for t in stats.values() if t.get("count") and t.get("maximum_speed", 4) < 6]
-        ref = max(slow, key=lambda t: t["count"], default=None)
-        self.ref_soft = ref["soft_attack"] if ref and ref.get("soft_attack") else 0.0
+        self.ref_soft = {}
+        for fast in (False, True):
+            group = [t for t in stats.values() if t.get("count") and (t.get("maximum_speed", 4) >= 6) == fast]
+            n = sum(t["count"] for t in group)
+            if not n:
+                self.ref_soft[fast] = 0.0
+            elif fast:  # a mix of tanks, motorised, light divisions: their average
+                self.ref_soft[fast] = sum(t["count"] * t.get("soft_attack", 0) for t in group) / n
+            else:  # the main infantry
+                self.ref_soft[fast] = max(group, key=lambda t: t["count"]).get("soft_attack", 0)
 
     def quality(self, d, target=None):
         """How hard a division hits for its organisation x strength, from its template: soft attack against the
-        main infantry's (an armoured division counts at least as much: its armour carries it against 1939
-        infantry, see armor_factor), times its attack modifier in TARGET's terrain."""
+        main template of its speed class (set_stats), times its attack modifier in TARGET's terrain."""
         t = self.stats.get(getattr(d, "template", None))
-        if not t or not self.ref_soft:
+        ref = self.ref_soft.get(t.get("maximum_speed", 4) >= 6) if t else 0.0
+        if not ref:
             return 1.0
-        q = min(1.6, max(0.4, t.get("soft_attack", 0) / self.ref_soft))
-        if getattr(d, "unit", None) in self.armored_units:
-            q = max(q, 1.0)
+        q = min(1.6, max(0.4, t.get("soft_attack", 0) / ref))
         if target is not None and target in self.m.provinces:
             q *= 1.0 + t.get("terrain", {}).get(self.m.provinces[target].terrain, {}).get("attack", 0.0)
         return q
