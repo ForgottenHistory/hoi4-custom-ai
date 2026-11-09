@@ -19,7 +19,9 @@ researched tech modifiers for the battalion or its categories). Speed comes from
 has one, else the slowest equipment, x (1 + the battalion's maximum_speed). Division: attacks and width summed,
 speed the slowest line battalion (support companies keep up), terrain modifiers averaged over all battalions
 (support companies included).
-Not counted: doctrines, national spirits, generals, experience.
+Not counted: doctrines, national spirits, generals, experience. Checked against the template designer
+(GER 1939): Panzer-Division soft 77 / hard 115 both match; speed 7.4 vs 8.6 and infantry 4.0 vs 4.2 km/h (doctrine
+speed bonuses).
 """
 import collections
 import re
@@ -86,10 +88,13 @@ class FileData:
         st = dict(_stats(self.equipment.get(self.archetype(eq), [])))
         st.update(_stats(b))
         mult = collections.Counter()
+        # newer chassis raise what their modules add (light_tank_chassis_2: soft/hard attack +5%)
+        boost = _stats(pdx.get(self.equipment.get(self.archetype(eq), []), "module_add_stats_multiplier", []) or [])
+        boost.update(_stats(pdx.get(b, "module_add_stats_multiplier", []) or []))
         for m in modules:
             mb = self.modules.get(m, [])
             for k, v in _stats(pdx.get(mb, "add_stats", []) or []).items():
-                st[k] = st.get(k, 0) + v
+                st[k] = st.get(k, 0) + v * (1 + boost.get(k, 0))
             for k, v in _stats(pdx.get(mb, "multiply_stats", []) or []).items():
                 mult[k] += v
         for u, level in upgrades:
