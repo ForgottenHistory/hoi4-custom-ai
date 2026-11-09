@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.venv*/
+# recorded games: tens of MB each
+recordings/
