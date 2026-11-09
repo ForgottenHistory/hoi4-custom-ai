@@ -233,10 +233,14 @@ def main():
         for line in lines:
             print("  " + line)
     elif a.group and len(a.group) > 1:
-        group_id, group_armies, membership = a.group[0], a.group[1:], {}
+        group_id, group_armies = a.group[0], a.group[1:]
+        # after a restart: keep each division of these armies in the army it is in now
+        membership = {d.id: d.army for d in snap.take() if d.owner == tag and d.army in group_armies}
     else:
         group_id, group_armies, membership = 0, [], {}
     army_order = list(dict.fromkeys(membership.values()))  # creation order: the fast army first
+    if a.group and not a.organize:
+        army_order = group_armies
     leader_day = None
     ticks = 0
     can_stop = send("bridge.stop")[0].startswith("FAIL usage: bridge.stop")

@@ -45,6 +45,8 @@ class Settings:
     attack_floor = 10000       # no attack below 10 organisation, whatever the share
     fast_cap = 5               # fast divisions sent at one province (the rest look for other openings)
     infantry_cap = 6           # infantry divisions sent at one province
+    fast_reach = 6.0           # fast army: how fast a victory point's pull fades with route cost
+    fast_foe_weight = 2.0      # fast army: defenders count this much more on its routes (tanks go around strength)
     support_every = 10         # one infantry support point per this many reserve infantry divisions
     max_support = 4
     support_route = 1.2        # support points only on routes at most this much dearer than the best
@@ -99,12 +101,12 @@ class Planner:
     def terrain(self, p):
         return TERRAIN_COST.get(self.m.provinces[p].terrain, 2.0)
 
-    def routes(self, sources, allowed, foe_power):
+    def routes(self, sources, allowed, foe_power, foe_weight=1.0):
         """Cost from each province in ALLOWED to the cheapest of SOURCES ({province: starting cost}) (Dijkstra),
         counting each province's terrain and defenders on the way (the province itself included) and the
         rivers crossed."""
         def step(p):
-            return self.terrain(p) * (1.0 + foe_power.get(p, 0.0) / FULL_DIVISION)
+            return self.terrain(p) * (1.0 + foe_weight * foe_power.get(p, 0.0) / FULL_DIVISION)
         dist = {g: c0 + step(g) for g, c0 in sources.items() if g in allowed}
         heap = [(c, g) for g, c in dist.items()]
         heapq.heapify(heap)
@@ -119,6 +121,19 @@ class Planner:
                         dist[n] = nc
                         heapq.heappush(heap, (nc, n))
         return dist
+
+    def fast_routes(self, objectives, allowed, foe_power):
+        """The fast army's cost from each enemy province: a soft minimum over all OBJECTIVES ({province: victory
+        points}) of the route cost there, each weighted by its share of the points. Many cheap, lightly held points
+        (an open rear) pull as much as one big defended city; defenders count fast_foe_weight times."""
+        total = sum(objectives.values())
+        if not total:
+            return {}
+        pull = collections.defaultdict(float)
+        for q, v in objectives.items():
+            for t, c in self.routes({q: 0.0}, allowed, foe_power, self.s.fast_foe_weight).items():
+                pull[t] += v / total * math.exp(-c / self.s.fast_reach)
+        return {t: -self.s.fast_reach * math.log(a) for t, a in pull.items() if a > 0}
 
     def split(self, start, goal, foe_power, land):
         """Enemy strength on the weaker side of the line from START to GOAL: a thrust along it cuts the enemy's
@@ -143,7 +158,7 @@ class Planner:
         order = list(sec)
         dist = self.bfs(sec, own)
         order += sorted((q for q in dist if q not in sec),
-                        key=lambda q: (q not in front, dist[q], score.get(q, math.inf)))
+                        key=lambda q: (dist[q], q not in front, score.get(q, math.inf)))
         used = []
         for q in order:
             if n <= 0:
@@ -204,7 +219,7 @@ class Planner:
         route = self.routes(start, enemy_land, foe_power)  # infantry's local attacks: the nearest objective
         # the main axis (fast army, infantry reserves): the most valuable province of the enemy's main body
         goal = max((p for p in vps if p in body), key=vps.get, default=None)
-        fast_route = self.routes({goal: 0.0}, enemy_land, foe_power) if goal else {}
+        fast_route = self.fast_routes({p: v for p, v in vps.items() if p in body}, enemy_land, foe_power)
 
         def route_from(p, r=route):
             """Best route cost to an objective starting with an attack out of our province P."""
@@ -327,8 +342,17 @@ class Planner:
                 if not d.moving and d.province in land and ctrl[d.province] in ours:
                     here[d.province].append(d)
 
+            under_way = collections.defaultdict(list)  # attacks already sent, by target
+            for d in mine:
+                if d.moving and d.dest in land and ctrl[d.dest] in hostile:
+                    under_way[d.dest].append(d)
+
             def attack(targets, eligible, margin, min_org, keep_home, label, cap):
                 for t in targets:
+                    already = sum(power(d) for d in under_way[t])
+                    room = cap - len(under_way[t])
+                    if room <= 0:
+                        continue
                     pool = []
                     for p in self.nb(t):
                         staying = [d for d in here.get(p, ()) if d.id not in attacking]
@@ -340,13 +364,16 @@ class Planner:
                     # attacked across the worst river among the provinces we attack from
                     rv = max((m.river(d.province, t) for d in pool), default=0)
                     need = foe_power[t] * self.terrain(t) * margin * RIVER_ATTACK[rv]
-                    chosen, total = [], 0.0
+                    if under_way[t] and already > need:
+                        continue  # enough on the way
+                    chosen, total = [], already
                     for d in pool:
-                        if (total > need and chosen) or len(chosen) >= cap:
+                        if (total > need and chosen) or len(chosen) >= room:
                             break
                         chosen.append(d)
                         total += power(d)
                     if chosen and total > need:
+                        under_way[t] += chosen
                         for d in chosen:
                             orders[d.id] = t
                             attacking.add(d.id)
