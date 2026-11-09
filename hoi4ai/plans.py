@@ -1,6 +1,7 @@
-"""Battle plans for the infantry armies, as a player draws them: a front line on a stretch of the border with the
-target and an offensive line to a nearby victory point, executed when the war starts. Divisions on a plan build
-up the planning bonus before they attack, which plain move orders never get.
+"""Battle plans for our armies, as a player draws them: a front line on a stretch of the border with the target and
+an offensive line to a nearby victory point. Divisions on a plan build up the planning bonus, which plain move
+orders never get. With the army's cohesion immobile the game doesn't move them along the plan, so our own orders
+keep moving them while planning builds.
 
 The border comes from the game's CFront objects (handle type 66): one per border between one of our areas and an
 enemy area in a theatre. +0x58 lists its CFrontSections, connected stretches of border: each has our provinces in
@@ -85,7 +86,7 @@ def sections(proc, me, target, ctrl, max_misses=40):
     return out
 
 
-def make(m, armies, secs, vps, ctrl, target, near=4):
+def make(m, armies, secs, vps, ctrl, target, near=4, reach=3):
     """armies: {army id: [divisions]}; secs: [Section]; vps: {province: victory points} of the target.
     Returns [(army id, front id, start, end, target province, [division ids])]: each army on the section nearest
     to it, armies along a section in the order they stand, each with a stretch as long as its share; its offensive
@@ -95,9 +96,20 @@ def make(m, armies, secs, vps, ctrl, target, near=4):
     def d2(p, xy):
         return (pv[p].x - xy[0]) ** 2 + (pv[p].y - xy[1]) ** 2
 
+    # how far each province is from the border (armies far from it, e.g. a garrison elsewhere, get no plan)
+    border = {p for sec in secs for p in sec.ours}
+    away = {p: 0 for p in border}
+    todo = collections.deque(border)
+    while todo:
+        p = todo.popleft()
+        if away[p] < reach:
+            for n in m.neighbours.get(p, {}):
+                if n not in away and m.is_land(n):
+                    away[n] = away[p] + 1
+                    todo.append(n)
     on = collections.defaultdict(list)
     for aid, ds in armies.items():
-        if not ds:
+        if not ds or sum(d.province in away for d in ds) < len(ds) / 2:
             continue
         xy = (sum(pv[d.province].x for d in ds) / len(ds), sum(pv[d.province].y for d in ds) / len(ds))
         k = min(range(len(secs)), key=lambda j: min(d2(p, xy) for p in secs[j].ours))
@@ -148,6 +160,13 @@ def draw(plans):
 
 def delete(army_ids):
     return [f"army {a}: " + send(f"bridge.plan delete {a}")[0] for a in army_ids]
+
+
+IMMOBILE = 3  # cohesion: 0 flexible, 1 balanced, 2 rigid, 3 immobile
+
+
+def cohesion(army_ids, value=IMMOBILE):
+    return [f"army {a}: " + send(f"bridge.plan cohesion {a} {value}")[0] for a in army_ids]
 
 
 def execute(army_ids):

@@ -206,8 +206,11 @@ def main():
     ap.add_argument("--group", type=int, nargs="+", metavar=("GROUP", "ARMY"),
                     help="keep these armies in this army group (when not using --organize, e.g. after a restart)")
     ap.add_argument("--plans", action="store_true",
-                    help="infantry armies of the army group get battle plans (front line + offensive line, executed "
-                         "at war; they build up the planning bonus); the controller then only moves the other divisions")
+                    help="every army at the border gets a battle plan (front line + offensive line) with immobile "
+                         "cohesion: planning builds up while the controller keeps moving the divisions")
+    ap.add_argument("--execute", action="store_true",
+                    help="with --plans: leave the armies' cohesion as it is and execute the plans at war; the game "
+                         "then moves those armies and the controller only the rest")
     ap.add_argument("--armies", action="store_true",
                     help="let the game form armies and pick generals (their buffs); fronts and plans stay blocked")
     ap.add_argument("--no-takeover", action="store_true", help="don't block the game AI's army commands")
@@ -246,20 +249,25 @@ def main():
         army_order = group_armies
     leader_day = None
     planned, executed = set(), False
-    if a.plans and len(group_armies) > 1 and not a.dry_run:
+    if a.plans and group_armies and not a.dry_run:
         from hoi4ai.memory import Process
         provinces.refresh()
-        infantry = group_armies[1:]  # the first army of the group is the fast army
         divs0 = snap.take()
+        # every army that stands at the border (the fast one too); a restart redraws the plans
+        planning = sorted({d.army for d in divs0 if d.owner == tag and d.army})
+        plans.delete(planning)
         secs = plans.sections(Process(), me, tgt, provinces.controller)
         vps = {p: v for st in m.states.values() for p, v in st.victory_points.items()
                if provinces.controller[p] == tgt}
         if secs and vps:
-            armies = {aid: [d for d in divs0 if d.owner == tag and d.army == aid] for aid in infantry}
+            armies = {aid: [d for d in divs0 if d.owner == tag and d.army == aid] for aid in planning}
             for aid, ok, line in plans.draw(plans.make(m, armies, secs, vps, provinces.controller, tgt)):
                 print(line)
                 if ok:
                     planned.add(aid)
+            if not a.execute:  # the game keeps the plans (planning builds) but leaves the moving to us
+                for line in plans.cohesion(sorted(planned)):
+                    print(line)
         else:
             print("battle plans: no border with", target, "found" if not secs else "", "or no victory points")
     ticks = 0
@@ -299,13 +307,13 @@ def main():
             at_war = target in enemy_tags
             if at_war and war_start is None:
                 war_start = now
-            if planned and at_war and not executed:
+            if planned and a.execute and at_war and not executed:
                 for line in plans.execute(sorted(planned)):
                     print(line)
                 executed = True
-            # divisions of armies on a battle plan are the game's to move
+            # with --execute, divisions of armies on a battle plan are the game's to move
             orders, rep = planner.plan(provinces.controller,
-                                       [d for d in divs if not (d.owner == tag and d.army in planned)],
+                                       [d for d in divs if not (a.execute and d.owner == tag and d.army in planned)],
                                        tag, enemy_ids, tgt, at_war, friend_ids)
             mine = {d.id: d for d in divs if d.owner == tag}
             if membership and not a.dry_run:  # divisions that drifted out of their army go back
