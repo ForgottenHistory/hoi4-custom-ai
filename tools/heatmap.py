@@ -2,10 +2,12 @@
 
     python tools/heatmap.py [--tag GER] [--target POL] [--out FILE] [--no-open]
 
-Runs one planning step on the live game (sends nothing) and draws two panels around the front:
-  valuations: our front provinces by breakthrough score (yellow -> red), enemy provinces by attack score
-              (light -> dark blue); chosen breakthrough points ringed, the enemy's top victory point starred.
-  forces:     our divisions per province (green, with the count), enemy strength (red, organisation x strength).
+Runs one planning step on the live game (sends nothing) and draws two panels around the front with the target:
+  routes: each enemy province's cost to the goal (the target's top victory point, starred), counting terrain
+          and defenders (cheap = dark blue); our front by its best route (cheap = dark red). The fast army's
+          sector is ringed purple with the way it would push; infantry support points are ringed black.
+  forces: infantry+fast divisions per province (green; purple where fast divisions stand), enemy strength
+          (red, organisation x strength).
 """
 import argparse
 import datetime
@@ -16,9 +18,9 @@ from PIL import Image, ImageDraw, ImageFont
 
 import _bridge  # noqa: F401
 from controller import country_ids, enemies_of, friends_of, game_time
-from hoi4ai import mapdata
+from hoi4ai import mapdata, units
 from hoi4ai.divisions import Snapshotter
-from hoi4ai.front import Planner, power
+from hoi4ai.front import Planner
 from hoi4ai.live import Provinces
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -27,6 +29,7 @@ SEA, OTHER, OURS, FOE, FRIEND = (172, 198, 222), (222, 219, 210), (236, 232, 220
 HOT = [(255, 245, 170), (253, 174, 60), (215, 48, 31), (120, 0, 30)]
 COLD = [(222, 235, 247), (130, 180, 215), (33, 102, 172), (8, 40, 100)]
 GREEN = [(220, 240, 210), (120, 195, 110), (20, 120, 50), (0, 60, 25)]
+PURPLE = [(225, 205, 240), (170, 110, 210), (110, 30, 160), (60, 0, 100)]
 RED = [(250, 220, 210), (240, 130, 110), (190, 30, 30), (100, 0, 10)]
 
 
@@ -87,14 +90,17 @@ def main():
     enemies = [cid[t] for t in enemies_of(tag) if t in cid]
     friends = [cid[t] for t in friends_of(tag) if t in cid]
     now = game_time(tag)
-    pl = Planner(m, me)
+    fast_units = {n for n, u in units.load().items() if u.fast}
+    pl = Planner(m, me, fast_units)
     orders, rep = pl.plan(ctrl, divs, tag, enemies, tgt, tgt in enemies, friends)
     v = pl.view
     hostile = set(enemies) | {tgt}
     ours = {me} | set(friends)
 
     # crop around the front and the target country
-    focus = set(v["front"]) | {p for p in m.provinces if m.is_land(p) and ctrl[p] == tgt}
+    cont = m.provinces[v["goal"]].continent if v["goal"] else None
+    focus = {p for p in set(v["main"]) | {q for q in m.provinces if m.is_land(q) and ctrl[q] == tgt}
+             if cont is None or m.provinces[p].continent == cont}
     xs = [m.provinces[p].x for p in focus]
     ys = [m.provinces[p].y for p in focus]
     pad = 40
@@ -109,21 +115,25 @@ def main():
         c = ctrl[p]
         return OURS if c == me else FRIEND if c in ours else FOE if c in hostile else OTHER
 
-    # panel 1: valuations
-    bt, at = v["bt_score"], v["attack_score"]
-    brank, arank = ranks(bt), ranks(at)
-    col1 = {p: ramp(HOT, brank[p]) for p in bt}
-    col1.update({t: ramp(COLD, arank[t]) for t in at})
+    # panel 1: routes to the goal (cost: terrain x defenders); cheap = dark
+    fr = {p: c for p, c in v["front_route"].items() if c < float("inf")}
+    route = {t: c for t, c in v["route"].items() if ctrl[t] == tgt}
+    frank, rrank = ranks({p: -c for p, c in fr.items()}), ranks({t: -c for t, c in route.items()})
+    col1 = {p: ramp(HOT, frank[p]) for p in fr}
+    col1.update({t: ramp(COLD, rrank[t]) for t in route})
     img1 = panel(ids, (y0, y1, x0, x1), scale, col1, base)
 
     # panel 2: forces
-    count = {}
+    line_n, fast_n = {}, {}
     for d in divs:
         if d.owner == tag:
-            count[d.province] = count.get(d.province, 0) + 1
+            tgt_map = fast_n if d.id in v["fast"] else line_n
+            tgt_map[d.province] = tgt_map.get(d.province, 0) + 1
+    count = {p: line_n.get(p, 0) + fast_n.get(p, 0) for p in set(line_n) | set(fast_n)}
     foe = v["foe_power"]
     cmax, fmax = max(count.values(), default=1), max(foe.values(), default=1) or 1
     col2 = {p: ramp(GREEN, n / cmax) for p, n in count.items()}
+    col2.update({p: ramp(PURPLE, 0.35 + 0.65 * n / cmax) for p, n in count.items() if fast_n.get(p)})
     col2.update({p: ramp(RED, f / fmax) for p, f in foe.items()})
     img2 = panel(ids, (y0, y1, x0, x1), scale, col2, base)
 
@@ -133,36 +143,41 @@ def main():
 
     f_small, f_big = font(9 + 2 * scale), font(14 + 2 * scale)
     d1, d2 = ImageDraw.Draw(img1), ImageDraw.Draw(img2)
-    for p, s in bt.items():
-        x, y = xy(p)
-        d1.text((x, y), "%.2f" % s, fill=(255, 255, 255) if brank[p] > 0.7 else (40, 20, 0), font=f_small,
-                anchor="mm")
-    for t, s in at.items():
-        x, y = xy(t)
-        d1.text((x, y), "%.2f" % s, fill=(255, 255, 255) if arank[t] > 0.6 else (10, 30, 60), font=f_small,
-                anchor="mm")
-    for p in v["breakthroughs"]:
-        x, y = xy(p)
-        r = 9 * scale
-        d1.ellipse((x - r, y - r, x + r, y + r), outline=(0, 0, 0), width=max(2, scale))
-        d2.ellipse((x - r, y - r, x + r, y + r), outline=(0, 0, 0), width=max(2, scale))
-    for b, sec in v["sectors"].items():
-        for q in sec[1:]:
+    for p, c in fr.items():
+        d1.text(xy(p), "%.0f" % c, fill=(255, 255, 255) if frank[p] > 0.7 else (40, 20, 0), font=f_small, anchor="mm")
+    for t, c in route.items():
+        d1.text(xy(t), "%.0f" % c, fill=(255, 255, 255) if rrank[t] > 0.6 else (10, 30, 60), font=f_small, anchor="mm")
+    # the fast army's way: from its point, always on to the cheaper neighbour
+    for b, (kind, sec) in v["sectors"].items():
+        if kind != "fast":
+            continue
+        cur = min((t for t in m.neighbours.get(b, ()) if t in route), key=route.get, default=None)
+        pts = [xy(b)]
+        seen = set()
+        while cur is not None and cur not in seen:
+            seen.add(cur)
+            pts.append(xy(cur))
+            nxt = min((n for n in m.neighbours.get(cur, ()) if n in route), key=route.get, default=None)
+            cur = nxt if nxt is not None and route[nxt] < route[cur] else None
+        for d in (d1, d2):
+            d.line(pts, fill=(120, 0, 160), width=max(3, 2 * scale))
+    for b, (kind, sec) in v["sectors"].items():
+        colour = (120, 0, 160) if kind == "fast" else (0, 0, 0)
+        for i, q in enumerate(sec):
             x, y = xy(q)
-            r = 6 * scale
+            r = (9 if i == 0 else 6) * scale
             for d in (d1, d2):
-                d.ellipse((x - r, y - r, x + r, y + r), outline=(60, 60, 60), width=max(1, scale // 2 + 1))
+                d.ellipse((x - r, y - r, x + r, y + r), outline=colour, width=max(2, scale) if i == 0 else max(1, scale // 2 + 1))
     if v["goal"]:
         x, y = xy(v["goal"])
         for d in (d1, d2):
             d.text((x, y - 10 * scale), "*", fill=(0, 0, 0), font=f_big, anchor="mm")
     for p, n in count.items():
-        x, y = xy(p)
-        d2.text((x, y), str(n), fill=(255, 255, 255) if n / cmax > 0.4 else (0, 40, 0), font=f_small, anchor="mm")
+        f = fast_n.get(p, 0)
+        label = "%d+%d" % (n - f, f) if f else str(n)
+        d2.text(xy(p), label, fill=(255, 255, 255) if f or n / cmax > 0.4 else (0, 40, 0), font=f_small, anchor="mm")
     for p, f in foe.items():
-        x, y = xy(p)
-        d2.text((x, y), "%.0f" % f, fill=(255, 255, 255) if f / fmax > 0.4 else (80, 0, 0), font=f_small,
-                anchor="mm")
+        d2.text(xy(p), "%.0f" % f, fill=(255, 255, 255) if f / fmax > 0.4 else (80, 0, 0), font=f_small, anchor="mm")
 
     head = 70
     W, H = img1.width + img2.width + 30, img1.height + head + 10
@@ -171,12 +186,12 @@ def main():
     out.paste(img2, (img1.width + 20, head))
     d = ImageDraw.Draw(out)
     war = "at war" if tgt in enemies else "not at war"
-    d.text((10, 8), f"{tag} vs {target}, {now:%d %b %Y %H:00}, {war}: {rep['divisions']} divisions, "
-                    f"front {rep['front']} provinces, {rep['breakthroughs']} breakthroughs (big ring, small rings = rest of sector), "
+    d.text((10, 8), f"{tag} vs {target}, {now:%d %b %Y %H:00}, {war}: {rep['divisions']} divisions ({rep['fast']} fast), "
+                    f"front {rep['front']}; purple = fast army sector and its way, black = infantry support points, "
                     f"* = {target}'s top victory point", fill=(0, 0, 0), font=f_big)
-    d.text((10, 40), "Valuations: our front by breakthrough score (yellow -> red), "
-                     "enemy provinces by attack score (light -> dark blue); colour = rank", fill=(60, 60, 60), font=f_small)
-    d.text((img1.width + 20, 40), "Forces: our divisions per province (green, count), "
+    d.text((10, 40), "Routes: cost to the goal (terrain x defenders), cheap = dark; our front: best route from there",
+           fill=(60, 60, 60), font=f_small)
+    d.text((img1.width + 20, 40), "Forces: infantry+fast per province (purple = fast there), "
                                   "enemy organisation x strength (red)", fill=(60, 60, 60), font=f_small)
     path = a.out or os.path.join(REPO, "recordings", "heatmaps",
                                  f"{tag}_{target}_{now:%Y%m%d_%H}_{datetime.datetime.now():%H%M%S}.png")

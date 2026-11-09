@@ -18,7 +18,7 @@ import time
 
 import _bridge  # noqa: F401
 from hoi4bridge import BridgeError, query, send, trigger
-from hoi4ai import mapdata
+from hoi4ai import mapdata, units
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.front import Planner
 from hoi4ai.live import Provinces
@@ -82,8 +82,9 @@ class Log:
         self.moves.write("time\tdivision\tfrom\tto\tkind\tresult\n")
         self._cols = None
 
-    COLS = ["date", "at_war", "enemies", "divisions", "front", "main_front", "breakthroughs", "attacks",
-            "attackers", "retreats", "unposted", "orders", "moves", "failed", "our_power", "enemy_power",
+    COLS = ["date", "at_war", "enemies", "divisions", "fast", "front", "main_front", "fast_points",
+            "support_points", "fast_attacks", "fast_attacks_divisions", "attacks", "attacks_divisions", "retreats",
+            "unposted", "orders", "moves", "failed", "our_power", "enemy_power",
             "target_provinces", "taken", "goal", "capitulated", "ms"]
 
     def tick(self, row):
@@ -116,7 +117,8 @@ def main():
     me, tgt = ids[tag], ids[target]
     provinces = Provinces()
     snap = Snapshotter(os.path.join(REPO, ".cache", "controller_snap.tsv"))
-    planner = Planner(m, me)
+    fast_units = {n for n, u in units.load().items() if u.fast}
+    planner = Planner(m, me, fast_units)
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     log = Log(os.path.join(REPO, "recordings", f"controller_{tag}_{stamp}"))
     if not a.no_takeover and not a.dry_run:
@@ -179,7 +181,7 @@ def main():
                        ms=int((time.time() - t0) * 1000))
             log.tick(row)
             print(f"{row['date']} war={row['at_war']} divs={rep['divisions']} front={rep['front']} "
-                  f"bt={rep['breakthroughs']} attacks={rep.get('attacks', 0)} moves={sent} fail={failed} "
+                  f"fast={rep['fast']} attacks={rep.get('fast_attacks', 0)}+{rep.get('attacks', 0)} moves={sent} fail={failed} "
                   f"taken={taken}/{len(target_land)} ({row['ms']} ms)")
             if a.once:
                 for did, prov in list(orders.items())[:15]:

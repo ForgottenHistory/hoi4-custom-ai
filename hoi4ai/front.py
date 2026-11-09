@@ -1,18 +1,24 @@
-"""Army planning: hold the border, concentrate reserves at a few breakthrough points, attack where it pays.
+"""Army planning, after how a player runs an offensive (Germany vs Poland, 1939):
 
-Pure logic (no game calls): plan() takes the map, who controls each province, and every division, and returns
-the province each of our divisions should go to. A Planner keeps state between calls (who holds where, the
-chosen breakthrough points, each division's highest organisation seen), so orders don't flap.
+- Infantry holds the line: one division on every province facing the enemy; the rest of the infantry gathers
+  at a few support points along good routes and makes local attacks where it clearly outweighs the defenders.
+- Fast divisions (armour, motorised: see units.py) form one breakthrough army. Before the war it deploys at the
+  start of the best route to the enemy's heart; at war it attacks along that route and keeps going (exploits),
+  always toward the cheapest way on to the goal.
+- A route's cost counts terrain (plains cheap, forest and hills dear, marsh and mountains very dear) and the
+  defenders on it. The goal is the enemy's most valuable province (its capital in practice).
 
-The idea, from comparing a player's invasion of Poland (15 days) with the game AI's (36 days): the player held
-the line thinly, put the mass of divisions on a few chosen provinces, and attacked there; the AI spread
-divisions along whole fronts and kept reshuffling them.
+Pure logic (no game calls). A Planner keeps state between calls (posts, chosen points, best organisation seen)
+so orders don't flap. plan() returns {division id: province} and a report; self.view holds what it saw.
 """
 import collections
+import heapq
 import math
 
-TERRAIN_COST = {"plains": 1.0, "desert": 1.0, "forest": 1.3, "jungle": 1.5, "hills": 1.4, "marsh": 1.6,
-                "urban": 1.6, "mountain": 2.0}
+# cost of moving and fighting through a province, by terrain (plains = 1)
+TERRAIN_COST = {"plains": 1.0, "desert": 1.0, "urban": 1.5, "forest": 2.0, "hills": 2.0, "jungle": 3.0,
+                "marsh": 3.0, "mountain": 4.0}
+FULL_DIVISION = 80.0  # power (organisation x strength) of a fresh 1939 infantry division
 
 
 def power(d):
@@ -21,24 +27,27 @@ def power(d):
 
 
 class Settings:
-    attack_margin = 1.6        # attack when our power >= margin x enemy power x terrain cost
+    attack_margin = 1.6        # infantry attacks when its power >= margin x enemy power x terrain cost
+    fast_margin = 1.1          # the same for the fast army
     attack_min_org = 0.55      # share of a division's best organisation it needs to attack
+    fast_min_org = 0.40
     retreat_org = 0.20         # attackers below this share are pulled back
-    breakthrough_every = 6     # one breakthrough point per this many reserve divisions
-    breakthrough_keep = 8      # ticks a breakthrough point is kept while it stays on the front
-    sector_size = 3            # front provinces a breakthrough force spreads over (the point and its best neighbours)
-    max_breakthroughs = 6
+    support_every = 10         # one infantry support point per this many reserve infantry divisions
+    max_support = 4
+    sector_size = 3            # front provinces a force spreads over (its point and best neighbours)
+    keep = 8                   # planning steps a chosen point is kept while it stays on the front
 
 
 class Planner:
-    def __init__(self, m, me, settings=None):
+    def __init__(self, m, me, fast_units=(), settings=None):
         self.m, self.me = m, me
+        self.fast_units = set(fast_units)
         self.s = settings or Settings()
         self.best_org = {}          # division id -> highest org seen
         self.hold = {}              # division id -> province it holds / stages at
-        self.breakthroughs = {}     # province -> ticks left
-        self.sectors = {}           # breakthrough province -> the front provinces its force spreads over
+        self.points = {}            # province -> (kind 'fast' | 'support', steps left)
         self.tick = 0
+        self.view = {}
         self._land_nb = {p: [n for n in nb if m.is_land(n)] for p, nb in m.neighbours.items() if m.is_land(p)}
 
     # --- helpers ---------------------------------------------------------------------------------------------
@@ -56,25 +65,48 @@ class Planner:
                     q.append(n)
         return dist
 
-    def sector(self, b, score):
-        """B and its best-scoring neighbours on the same front (SCORE holds that front's provinces)."""
-        nbs = sorted((n for n in self.nb(b) if n in score), key=score.get, reverse=True)
-        return [b] + nbs[:self.s.sector_size - 1]
+    def is_fast(self, d):
+        return getattr(d, "unit", None) in self.fast_units
 
     def org_share(self, d):
         best = max(self.best_org.get(d.id, 0), d.org)
         self.best_org[d.id] = best
         return d.org / best if best else 0.0
 
+    def terrain(self, p):
+        return TERRAIN_COST.get(self.m.provinces[p].terrain, 2.0)
+
+    def routes(self, goal, allowed, foe_power):
+        """Cost from each province in ALLOWED to GOAL (Dijkstra), counting each province's terrain and defenders
+        on the way, the province itself included."""
+        def step(p):
+            return self.terrain(p) * (1.0 + foe_power.get(p, 0.0) / FULL_DIVISION)
+        dist = {goal: step(goal)}
+        heap = [(dist[goal], goal)]
+        while heap:
+            c, p = heapq.heappop(heap)
+            if c > dist.get(p, math.inf):
+                continue
+            for n in self.nb(p):
+                if n in allowed:
+                    nc = c + step(n)
+                    if nc < dist.get(n, math.inf):
+                        dist[n] = nc
+                        heapq.heappush(heap, (nc, n))
+        return dist
+
+    def sector(self, b, score):
+        """B and its best-scoring neighbours on the same front (SCORE: lower is better)."""
+        nbs = sorted((n for n in self.nb(b) if n in score), key=score.get)
+        return [b] + nbs[:self.s.sector_size - 1]
+
     # --- planning --------------------------------------------------------------------------------------------
     def plan(self, ctrl, divisions, my_tag, enemies, target, at_war, friends=()):
         """ctrl: controller country id per province (indexable). enemies: country ids at war with us.
         target: the country id we mean to attack (also before the war). friends: countries whose land our
-        divisions may stand on and attack from (subjects, allies, military access). Returns
-        (orders {div id: province}, report dict)."""
+        front runs along (subjects, faction members)."""
         self.tick += 1
         m, s = self.m, self.s
-        self.sectors = {}
         hostile = set(enemies) | ({target} if target else set())
         land = self._land_nb
         ours = {self.me} | set(friends)
@@ -84,139 +116,171 @@ class Planner:
         for d in divisions:
             if d.owner != my_tag and d.province in land and ctrl[d.province] in hostile:
                 foe_power[d.province] += power(d)
-        # count only enemy divisions standing in hostile-controlled provinces (others are elsewhere / allies')
 
         facing = {p: [q for q in self.nb(p) if ctrl[q] in hostile] for p in own}
         front = {p for p, f in facing.items() if f}
         main = {p for p in front if any(ctrl[q] == target for q in facing[p])}
 
-        # the enemy's most valuable province (its capital in practice) gives the direction of attack
         goal = None
         if target:
             vps = [(v, p) for st in m.states.values() for p, v in st.victory_points.items()
                    if p in land and ctrl[p] == target]
             if vps:
                 goal = max(vps)[1]
-        to_goal = self.bfs([goal], set(land)) if goal else {}
+        enemy_land = {p for p in land if ctrl[p] in hostile}
+        route = self.routes(goal, enemy_land, foe_power) if goal else {}
 
-        def value(t):
-            st = m.states.get(m.provinces[t].state)
-            vp = st.victory_points.get(t, 0) if st else 0
-            return 1.0 + vp / 5.0 + 3.0 / (1 + to_goal.get(t, 50))
+        def route_from(p):
+            """Best route cost to the goal starting with an attack out of our province P."""
+            return min((route[t] for t in facing.get(p, ()) if t in route), default=math.inf)
 
-        def cost(t):
-            return TERRAIN_COST.get(m.provinces[t].terrain, 1.3)
-
-        # --- breakthrough points: front provinces facing weak, valuable enemy provinces ---------------------
-        for p in list(self.breakthroughs):
-            self.breakthroughs[p] -= 1
-            if self.breakthroughs[p] <= 0 or p not in main:
-                del self.breakthroughs[p]
-        # each piece of our territory connected by land (e.g. the mainland, an exclave) is planned on its own:
-        # its divisions hold its front and mass at its own breakthrough points
+        # --- territory pieces connected by land (mainland, exclaves) are planned separately ------------------
         comp = {}
         for p in own:
             if p not in comp:
                 for q in self.bfs([p], own):
                     comp[q] = p
-        divs_in = collections.Counter(comp[d.province] for d in mine if d.province in comp)
+
+        for p in list(self.points):
+            kind, left = self.points[p]
+            if left <= 1 or p not in main:
+                del self.points[p]
+            else:
+                self.points[p] = (kind, left - 1)
+
+        fast = [d for d in mine if self.is_fast(d)]
+        line = [d for d in mine if not self.is_fast(d)]
+        line_in = collections.Counter(comp[d.province] for d in line if d.province in comp)
+        fast_in = collections.Counter(comp[d.province] for d in fast if d.province in comp)
         front_in = collections.defaultdict(set)
         for p in front:
             front_in[comp[p]].add(p)
-        demand = {}
+
+        line_demand, fast_demand, sectors = {}, {}, {}
         for c, fr in front_in.items():
-            n = divs_in[c]
-            mainc = [p for p in fr if p in main]
-            if n < len(fr):  # not enough: hold where the enemy is strongest, the main front first
+            score = {p: route_from(p) for p in fr if p in main}
+            score = {p: v for p, v in score.items() if v < math.inf}
+            n_line, n_fast = line_in[c], fast_in[c]
+            # infantry holds the line; if short, where the enemy is strongest, the main front first
+            if n_line < len(fr):
                 ranked = sorted(fr, key=lambda p: (p in main, sum(foe_power[q] for q in facing[p])), reverse=True)
-                demand.update({p: 1 for p in ranked[:n]})
+                line_demand.update({p: 1 for p in ranked[:n_line]})
+                reserves = 0
+            else:
+                line_demand.update({p: 1 for p in fr})
+                reserves = n_line - len(fr)
+            if not score:
                 continue
-            demand.update({p: 1 for p in fr})
-            reserves = n - len(fr)
-            mine_bt = [b for b in self.breakthroughs if comp.get(b) == c]
-            want = min(s.max_breakthroughs, max(1 if mainc else 0, reserves // s.breakthrough_every))
-            score = {p: sum(value(t) / ((foe_power[t] + 0.5) * cost(t)) for t in facing[p] if ctrl[t] == target)
-                     for p in mainc}
-            used = {q for b in mine_bt for q in self.sector(b, score)}
-            if len(mine_bt) < want:
-                for p in sorted(score, key=score.get, reverse=True):
-                    if len(mine_bt) >= want:
-                        break
-                    sec = self.sector(p, score)
-                    if p not in self.breakthroughs and not any(q in used or any(n in used for n in self.nb(q))
-                                                               for q in sec):
-                        self.breakthroughs[p] = s.breakthrough_keep
-                        mine_bt.append(p)
-                        used.update(sec)
-            if mine_bt and reserves:
-                # each breakthrough force spreads over its sector, so it can attack from several sides
-                per = math.ceil(reserves / len(mine_bt))
-                for b in mine_bt:
+            # the fast army: one sector, at the start of the best route
+            fpts = [p for p, (k, _) in self.points.items() if k == "fast" and comp.get(p) == c]
+            if n_fast and not fpts:
+                best = min(score, key=score.get)
+                self.points[best] = ("fast", s.keep)
+                fpts = [best]
+            used = set()
+            for b in fpts:
+                sec = self.sector(b, score)
+                sectors[b] = ("fast", sec)
+                used.update(sec)
+                for i, q in enumerate(sec):
+                    fast_demand[q] = fast_demand.get(q, 0) + n_fast // len(sec) + (1 if i < n_fast % len(sec) else 0)
+            # infantry support points: along the next best routes, apart from each other and the fast sector
+            spts = [p for p, (k, _) in self.points.items() if k == "support" and comp.get(p) == c]
+            for b in spts:
+                used.update(self.sector(b, score))
+            want = min(s.max_support, reserves // s.support_every)
+            for p in sorted(score, key=score.get):
+                if len(spts) >= want:
+                    break
+                sec = self.sector(p, score)
+                if p in self.points or any(q in used or any(n in used for n in self.nb(q)) for q in sec):
+                    continue
+                self.points[p] = ("support", s.keep)
+                spts.append(p)
+                used.update(sec)
+            if spts and reserves:
+                per = math.ceil(reserves / len(spts))
+                for b in spts:
                     sec = self.sector(b, score)
+                    sectors[b] = ("support", sec)
                     for i, q in enumerate(sec):
-                        demand[q] += per // len(sec) + (1 if i < per % len(sec) else 0)
-            self.sectors.update({b: self.sector(b, score) for b in mine_bt})
+                        line_demand[q] = line_demand.get(q, 0) + per // len(sec) + (1 if i < per % len(sec) else 0)
 
-        # what the plan saw, for tools/heatmap.py
-        self.view = dict(
-            front=front, main=main, demand=demand, breakthroughs=set(self.breakthroughs), sectors=dict(self.sectors), goal=goal,
-            foe_power=dict(foe_power), component=comp,
-            bt_score={p: sum(value(t) / ((foe_power[t] + 0.5) * cost(t)) for t in facing[p] if ctrl[t] == target)
-                      for p in main},
-            attack_score={t: value(t) / (foe_power[t] * cost(t) + 0.2)
-                          for p in main for t in facing[p] if ctrl[t] == target},
-            value={t: value(t) for p in main for t in facing[p] if ctrl[t] == target})
+        self.view = dict(front=front, main=main, goal=goal, foe_power=dict(foe_power), component=comp,
+                         route=route, front_route={p: route_from(p) for p in main}, sectors=sectors,
+                         line_demand=line_demand, fast_demand=fast_demand,
+                         fast={d.id for d in fast})
 
-        # --- attacks (at war with the target): from where our divisions stand now -----------------------------
         orders, attacking = {}, set()
         report = collections.Counter()
         if at_war and target in enemies:
             here = collections.defaultdict(list)
             for d in mine:
-                if not d.moving and d.province in own:
+                if not d.moving and d.province in land and ctrl[d.province] in ours:
                     here[d.province].append(d)
-            cands = {t for p in main for t in facing[p] if ctrl[t] == target}
-            ranked = sorted(cands, key=lambda t: value(t) / (foe_power[t] * cost(t) + 0.2), reverse=True)
-            for t in ranked:
-                need = foe_power[t] * cost(t) * s.attack_margin
-                pool = []
-                for p in self.nb(t):
-                    if p not in own:
-                        continue
-                    staying = [d for d in here[p] if d.id not in attacking]
-                    ready = sorted((d for d in staying if self.org_share(d) >= s.attack_min_org),
-                                   key=power, reverse=True)
-                    # keep one division home if that province also faces enemy divisions elsewhere
-                    exposed = any(foe_power[q] > 0 for q in facing.get(p, ()) if q != t)
-                    pool += ready[:max(0, len(staying) - 1)] if exposed else ready
-                pool.sort(key=power, reverse=True)
-                chosen, total = [], 0.0
-                for d in pool:
-                    if total > need and chosen:
-                        break
-                    chosen.append(d)
-                    total += power(d)
-                if chosen and total > need:
-                    for d in chosen:
-                        orders[d.id] = t
-                        attacking.add(d.id)
-                    report["attacks"] += 1
-                    report["attackers"] += len(chosen)
 
-        # --- pull back worn-out attackers ------------------------------------------------------------------
-        for d in mine:
+            def attack(targets, eligible, margin, min_org, keep_home, label):
+                for t in targets:
+                    need = foe_power[t] * self.terrain(t) * margin
+                    pool = []
+                    for p in self.nb(t):
+                        staying = [d for d in here.get(p, ()) if d.id not in attacking]
+                        ready = sorted((d for d in staying if eligible(d) and self.org_share(d) >= min_org),
+                                       key=power, reverse=True)
+                        exposed = keep_home and any(foe_power[q] > 0 for q in facing.get(p, ()) if q != t)
+                        pool += ready[:max(0, len(staying) - 1)] if exposed else ready
+                    pool.sort(key=power, reverse=True)
+                    chosen, total = [], 0.0
+                    for d in pool:
+                        if total > need and chosen:
+                            break
+                        chosen.append(d)
+                        total += power(d)
+                    if chosen and total > need:
+                        for d in chosen:
+                            orders[d.id] = t
+                            attacking.add(d.id)
+                        report[label] += 1
+                        report[label + "_divisions"] += len(chosen)
+
+            # the fast army first: wherever it stands, push along the cheapest way on to the goal
+            fast_at = {d.province for d in fast if d.id not in attacking}
+            fast_targets = sorted({t for p in fast_at for t in self.nb(p) if ctrl[t] in hostile and t in route},
+                                  key=route.get)
+            attack(fast_targets, self.is_fast, s.fast_margin, s.fast_min_org, False, "fast_attacks")
+            # infantry: local attacks where clearly stronger; weak, open, on-route provinces first
+            cands = {t for p in front for t in facing[p] if ctrl[t] == target}
+            ranked = sorted(cands, key=lambda t: (foe_power[t] + 10) * self.terrain(t) + route.get(t, 99) / 10)
+            attack(ranked, lambda d: not self.is_fast(d), s.attack_margin, s.attack_min_org, True, "attacks")
+
+        for d in mine:  # pull back worn-out attackers
             if d.moving and d.dest in land and ctrl[d.dest] in hostile and self.org_share(d) < s.retreat_org:
                 orders[d.id] = d.province
                 attacking.add(d.id)
                 report["retreats"] += 1
 
-        # --- everyone else: fill the demand, nearest first, keeping last tick's posts -------------------------
+        # --- everyone else: fill the posts, nearest first, keeping last step's posts ---------------------------
+        unposted = 0
+        for group, demand in ((line, line_demand), (fast, fast_demand)):
+            unposted += self._assign(group, demand, own, attacking, ctrl, hostile, orders)
+        for did, p in orders.items():
+            if did not in attacking:
+                self.hold[did] = p
+
+        report.update(divisions=len(mine), fast=len(fast), front=len(front), main_front=len(main),
+                      fast_points=sum(1 for k, _ in self.points.values() if k == "fast"),
+                      support_points=sum(1 for k, _ in self.points.values() if k == "support"),
+                      unposted=unposted, enemy_power=round(sum(foe_power.values()), 1),
+                      our_power=round(sum(power(d) for d in mine), 1), goal=goal or 0)
+        return orders, report
+
+    def _assign(self, group, demand, own, attacking, ctrl, hostile, orders):
         left = dict(demand)
         free = []
-        for d in mine:
+        for d in group:
             if d.id in attacking:
                 continue
-            if d.moving and d.dest in land and ctrl[d.dest] in hostile:
+            if d.moving and d.dest in self._land_nb and ctrl[d.dest] in hostile:
                 continue  # an attack under way: let it finish
             p = self.hold.get(d.id)
             if p in left and left[p] > 0:
@@ -224,45 +288,33 @@ class Planner:
                 orders.setdefault(d.id, p)
             else:
                 free.append(d)
-        if free:
-            open_posts = {p for p, n in left.items() if n > 0}
-            reach = own | open_posts
-            dist_cache = {}
-            pairs = []
-            for d in free:
-                src = d.province if d.province in own else None
-                if src is None:
-                    continue
-                if src not in dist_cache:
-                    dist_cache[src] = self.bfs([src], reach)
-                for p in open_posts:
-                    if p in dist_cache[src]:
-                        pairs.append((dist_cache[src][p], d.id, p))
-            pairs.sort()
-            byid = {d.id: d for d in free}
-            done = set()
-            for dist, did, p in pairs:
-                if did in done or left[p] <= 0:
-                    continue
-                left[p] -= 1
-                done.add(did)
-                orders[did] = p
-                self.hold[did] = p
-            for d in free:  # posts full or out of reach: go to the nearest breakthrough point we can reach
-                if d.id in done or d.province not in dist_cache:
-                    continue
-                dc = dist_cache[d.province]
-                near = [(dc[b], b) for b in self.breakthroughs if b in dc]
-                if near:
-                    orders[d.id] = min(near)[1]
-                    done.add(d.id)
-            report["unposted"] = len(byid) - len(done)
-        for did, p in orders.items():
-            if did not in attacking:
-                self.hold[did] = p
-
-        report.update(divisions=len(mine), front=len(front), main_front=len(main),
-                      breakthroughs=len(self.breakthroughs), enemy_power=round(sum(foe_power.values()), 1),
-                      our_power=round(sum(power(d) for d in mine), 1))
-        report["goal"] = goal or 0
-        return orders, report
+        if not free:
+            return 0
+        posts = [p for p in demand]
+        reach = own | set(posts)
+        dist_cache, pairs = {}, []
+        for d in free:
+            if d.province not in own:
+                continue
+            if d.province not in dist_cache:
+                dist_cache[d.province] = self.bfs([d.province], reach)
+            for p in posts:
+                if left[p] > 0 and p in dist_cache[d.province]:
+                    pairs.append((dist_cache[d.province][p], d.id, p))
+        pairs.sort()
+        done = set()
+        for _, did, p in pairs:
+            if did in done or left[p] <= 0:
+                continue
+            left[p] -= 1
+            done.add(did)
+            orders[did] = p
+        for d in free:  # all posts full or out of reach: join the nearest post anyway
+            if d.id in done or d.province not in dist_cache:
+                continue
+            dc = dist_cache[d.province]
+            near = [(dc[p], p) for p in posts if p in dc]
+            if near:
+                orders[d.id] = min(near)[1]
+                done.add(d.id)
+        return len(free) - len(done)

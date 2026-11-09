@@ -28,7 +28,7 @@ all the way; the AI tried to cancel it 103 times and to build German armies 1526
 | script | does |
 |---|---|
 | `tools/controller.py --tag GER --target POL` | run the country's army with our planner (below); logs to `recordings/controller_*` (`--dry-run --once` to just see a plan) |
-| `tools/heatmap.py [--tag GER --target POL]` | one planning step on the live game (sends nothing), drawn as a PNG: breakthrough and attack scores, sectors, our divisions and enemy strength per province (`recordings/heatmaps/`) |
+| `tools/heatmap.py [--tag GER --target POL]` | one planning step on the live game (sends nothing), drawn as a PNG: route costs to the goal, the fast army's sector and way, infantry support points, our infantry/fast divisions and enemy strength per province (`recordings/heatmaps/`) |
 | `tools/mapcheck.py [PROVINCE ..]` | build the map (through the active mods), print a province's neighbours, check it against the running game and count who controls what |
 | `tools/takeover.py TAG` / `--release TAG` | take a country's land army from the AI (or give it back) |
 | `tools/cmdrec.py [--dir FOLDER] [--tag TAG]` | record every command the game executes, with the in-game date, and a daily snapshot of every division; Ctrl+C stops |
@@ -52,14 +52,16 @@ and live data from the running game's memory.
   game state (`CCurrentGameState`), using the static the exe keeps only when RTTI confirms it, else by class
   name.
 - `divisions.py`: every division (owner, province, destination, organisation, strength, template) via `bridge.snap`.
-- `front.py`: the planner. Each connected piece of the territory we may stand on (our own, our subjects'
-  and faction members') holds every province facing the enemy with one division. Its reserves mass at a few
-  breakthrough points facing weak, open, valuable enemy provinces, toward the enemy's top victory point; each
-  breakthrough force spreads over a sector (the point and its two best neighbours on the front), so it can
-  attack from several sides.
-  Once at war, it attacks wherever the divisions next to an enemy province outweigh its defenders (organisation
-  x strength x terrain), keeps one division home where the province faces other enemy divisions, and pulls
-  back attackers whose organisation runs out.
+- `units.py`: sub-unit types from `common/units` (through the mods). A division is fast when its main type (the
+  one its counter shows) is armour, or mobile with a transport (motorised, mechanised) or no speed malus.
+- `pdx.py`: a small parser for the game's script files.
+- `front.py`: the planner, after how a player runs an offensive. Infantry holds every province facing the
+  enemy, gathers its reserves at a few support points, and attacks locally where clearly stronger. The fast
+  divisions form one breakthrough army: before the war it deploys at the start of the best route to the
+  enemy's top victory point, at war it attacks along that route and keeps pushing on the cheapest way. A
+  route's cost counts terrain (plains 1, urban 1.5, forest and hills 2, marsh and jungle 3, mountains 4) and
+  defenders. Each connected piece of the territory our front runs along (our own, our subjects' and faction
+  members') is planned on its own.
 - `live.py`: every province's controller, owner and state in one pass (~35 ms).
 
 ## Findings so far (Germany vs Poland, 1939 start)
@@ -80,7 +82,7 @@ provinces with direct moves.
 ## Layouts used (game 1.19.x)
 
 - Division (`CArmy`, handle type 51; the handle's object is the full object + 0x10): owner +0x1c8, province
-  `*(+0x1e0)+0xa4`, order `*(+0xb0)+0xc`, organisation +0x20, strength +0x30 (fixed point, 100000 = 100%),
+  `*(+0x1e0)+0xa4`, main sub-unit type `*(+0x128)+0x68` (std::string), destination +0x2a4 (0 = none), order `*(+0xb0)+0xc`, organisation +0x20, strength +0x30 (fixed point, 100000 = 100%),
   template name `*(+0x3a8)+0x20`. Full object: path at +0x2c0, destination +0x2b4.
 - Order (front / battle plan / army, type 53): owner +0x3c. Theatre (type 67): no owner field; its armies'
   list at +0x80 (owner of the first), divisions' list at +0x68.
