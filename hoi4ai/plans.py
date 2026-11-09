@@ -104,11 +104,33 @@ def along(m, secs, own):
     return pos
 
 
-def make(m, armies, secs, vps, ctrl, target, near=4, reach=3, always=()):
-    """armies: {army id: [divisions]}; secs: [Section]; vps: {province: victory points} of the target.
-    Returns [(army id, front id, start, end, target province, [division ids])]: each army's front line on the
-    stretch of border where its divisions stand (the middle 80% of them, along the border); its offensive
-    line to the most valuable victory point within NEAR provinces across its stretch (else the nearest)."""
+def calibrate(proc, army_id, front_id, division_ids, step=2000, width=4000):
+    """Where the game puts a front line for each stretch of a CFront: draw short test lines on ARMY_ID from 0% to
+    100%, read back the border pairs each covers, delete them. (How the game measures the percent is its own
+    business; this measures it.) Returns {our border province: position 0..1}."""
+    ds = " ".join(map(str, division_ids))
+    seen = collections.defaultdict(list)
+    for start in range(0, FULL, step):
+        end = min(FULL, start + width)
+        before = {lid for lid, _ in lines(proc, army_id)}
+        if not send(f"bridge.plan front {army_id} {front_id} {start} {end} {ds}")[0].startswith("OK"):
+            continue
+        new = [(lid, pairs) for lid, pairs in lines(proc, army_id) if lid not in before]
+        for lid, pairs in new:
+            for ours, _ in pairs:
+                seen[ours].append((start + end) / 2 / FULL)
+        if new:
+            send(f"bridge.plan delete {army_id} " + " ".join(str(lid) for lid, _ in new))
+    return {p: sum(v) / len(v) for p, v in seen.items()}
+
+
+def make(m, armies, border, front_id, vps, ctrl, target, fast=None, near=4, reach=3, always=()):
+    """armies: {army id: [divisions]}; border: {our border province: position 0..1} on CFront FRONT_ID (from
+    calibrate); vps: {province: victory points} of the target. Returns [(army id, front id, start, end, target
+    province, [division ids])]. The armies other than FAST share the border between them, in the order they stand
+    (each up to halfway to the next); the FAST army gets its own stretch, where the middle half of its divisions
+    stand. Each army's offensive line goes to the most valuable victory point within NEAR provinces across its
+    stretch (else the nearest)."""
     pv = m.provinces
 
     def d2(p, xy):
@@ -116,7 +138,6 @@ def make(m, armies, secs, vps, ctrl, target, near=4, reach=3, always=()):
 
     # how far each province is from the border: an army mostly farther than REACH (a garrison elsewhere) gets none,
     # unless it is in ALWAYS (the army group's)
-    border = {p for sec in secs for p in sec.ours}
     away = {p: 0 for p in border}
     todo = collections.deque(border)
     while todo:
@@ -126,23 +147,39 @@ def make(m, armies, secs, vps, ctrl, target, near=4, reach=3, always=()):
                 if n not in away and m.is_land(n):
                     away[n] = away[p] + 1
                     todo.append(n)
-    pos = along(m, secs, {p for p in m.provinces if m.is_land(p)} - {p for p in m.provinces if ctrl[p] == target})
-    out = []
+    pos = dict(border)  # every province of ours: the position of its nearest border province
+    todo = collections.deque(border)
+    while todo:
+        p = todo.popleft()
+        for n in m.neighbours.get(p, {}):
+            if n not in pos and m.is_land(n) and ctrl[n] != target:
+                pos[n] = pos[p]
+                todo.append(n)
+    where = {}
     for aid, ds in armies.items():
         if not ds or (aid not in always and sum(d.province in away for d in ds) < len(ds) / 2):
             continue
-        # the stretch where the army's divisions stand (the middle 80% of them), on the section most of them face
         at = sorted(pos[d.province] for d in ds if d.province in pos)
-        if not at:
-            continue
-        sec = min(secs, key=lambda x: (not x.start <= at[len(at) // 2] <= x.end, abs((x.start + x.end) / 2 - at[len(at) // 2])))
-        at = [min(max(v, sec.start), sec.end) for v in at]
-        lo, hi = at[int(len(at) * 0.1)], at[min(len(at) - 1, int(len(at) * 0.9))]
-        span = sec.end - sec.start
-        i0 = int((lo - sec.start) / span * len(sec.ours))
-        i1 = max(i0 + 1, min(len(sec.ours), int((hi - sec.start) / span * len(sec.ours)) + 1))
-        lo, hi = sec.start + i0 / len(sec.ours) * span, sec.start + i1 / len(sec.ours) * span
-        stretch = sec.ours[i0:i1]
+        if at:
+            where[aid] = at
+    stretches = {}
+    line_armies = sorted((a for a in where if a != fast), key=lambda a: where[a][len(where[a]) // 2])
+    lo_all, hi_all = min(border.values()), max(border.values())
+    meds = [where[a][len(where[a]) // 2] for a in line_armies]
+    for k, aid in enumerate(line_armies):
+        lo = lo_all if k == 0 else (meds[k - 1] + meds[k]) / 2
+        hi = hi_all if k == len(line_armies) - 1 else (meds[k] + meds[k + 1]) / 2
+        stretches[aid] = (lo, hi)
+    if fast in where:
+        at = where[fast]
+        lo, hi = at[len(at) // 4], at[3 * len(at) // 4]
+        if hi - lo < 0.04:
+            lo, hi = lo - 0.02, hi + 0.02
+        stretches[fast] = (max(0.0, lo), min(1.0, hi))
+    out = []
+    for aid, (lo, hi) in stretches.items():
+        stretch = [p for p, v in border.items() if lo <= v <= hi] or \
+                  [min(border, key=lambda p: abs(border[p] - (lo + hi) / 2))]
         across = {q for p in stretch for q in m.neighbours.get(p, {}) if ctrl[q] == target}
         dist = {q: 1 for q in across}
         todo = collections.deque(across)
@@ -160,7 +197,7 @@ def make(m, armies, secs, vps, ctrl, target, near=4, reach=3, always=()):
         else:
             mid = stretch[len(stretch) // 2]
             tgt = min(vps, key=lambda q: d2(q, (pv[mid].x, pv[mid].y)))
-        out.append((aid, sec.front, int(lo * FULL), int(hi * FULL), tgt, [d.id for d in ds]))
+        out.append((aid, front_id, int(lo * FULL), int(hi * FULL), tgt, [d.id for d in armies[aid]]))
     return out
 
 

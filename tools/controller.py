@@ -267,11 +267,36 @@ def main():
                if provinces.controller[p] == tgt}
         if secs and vps:
             armies = {aid: [d for d in divs0 if d.owner == tag and d.army == aid] for aid in planning}
-            for aid, ok, line in plans.draw(proc, plans.make(m, armies, secs, vps, provinces.controller, tgt,
-                                                             always=group_armies)):
-                print(line)
-                if ok:
-                    planned.add(aid)
+            # where the game puts each percent of each border: measured with test lines on the fast army
+            probe = group_armies[0]
+            borders = {f: plans.calibrate(proc, probe, f, [d.id for d in armies.get(probe, [])])
+                       for f in sorted({x.front for x in secs})}
+            borders = {f: b for f, b in borders.items() if b}
+            print("borders:", ", ".join(f"{f} ({len(b)} provinces)" for f, b in borders.items()))
+            # each army on the border most of its divisions are nearest to
+            near = {}
+            todo = collections.deque()
+            for f, b in borders.items():
+                for p in b:
+                    near.setdefault(p, f)
+                    todo.append(p)
+            while todo:
+                p = todo.popleft()
+                for n in m.neighbours.get(p, {}):
+                    if n not in near and m.is_land(n) and provinces.controller[n] != tgt:
+                        near[n] = near[p]
+                        todo.append(n)
+            on = collections.defaultdict(dict)
+            for aid, ds in armies.items():
+                votes = collections.Counter(near[d.province] for d in ds if d.province in near)
+                if votes:
+                    on[votes.most_common(1)[0][0]][aid] = ds
+            for f, group in on.items():
+                for aid, ok, line in plans.draw(proc, plans.make(m, group, borders[f], f, vps, provinces.controller,
+                                                                 tgt, fast=group_armies[0], always=group_armies)):
+                    print(line)
+                    if ok:
+                        planned.add(aid)
             if not a.execute:  # the game keeps the plans (planning builds) but leaves the moving to us
                 for line in plans.cohesion(sorted(planned)):
                     print(line)
