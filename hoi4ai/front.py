@@ -178,10 +178,11 @@ class Planner:
         return [b] + nbs[:self.s.sector_size - 1]
 
     # --- planning --------------------------------------------------------------------------------------------
-    def plan(self, ctrl, divisions, my_tag, enemies, target, at_war, friends=()):
+    def plan(self, ctrl, divisions, my_tag, enemies, target, at_war, friends=(), zones=None):
         """ctrl: controller country id per province (indexable). enemies: country ids at war with us.
         target: the country id we mean to attack (also before the war). friends: countries whose land our
-        front runs along (subjects, faction members)."""
+        front runs along (subjects, faction members). zones: {province: army id}: an army listed there only takes
+        posts in its own zone (it holds its own stretch of the front, where its battle plan is)."""
         self.tick += 1
         m, s = self.m, self.s
         hostile = set(enemies) | ({target} if target else set())
@@ -417,7 +418,7 @@ class Planner:
         # --- everyone else: fill the posts, nearest first, keeping last step's posts ---------------------------
         unposted = 0
         for group, demand in ((line, line_demand), (fast, fast_demand)):
-            unposted += self._assign(group, demand, own, attacking, ctrl, hostile, orders)
+            unposted += self._assign(group, demand, own, attacking, ctrl, hostile, orders, zones)
         for did, p in orders.items():
             if did not in attacking:
                 self.hold[did] = p
@@ -431,7 +432,12 @@ class Planner:
                       max_stack=max(collections.Counter(d.province for d in mine).values(), default=0))
         return orders, report
 
-    def _assign(self, group, demand, own, attacking, ctrl, hostile, orders):
+    def _assign(self, group, demand, own, attacking, ctrl, hostile, orders, zones=None):
+        zoned = set(zones.values()) if zones else set()
+
+        def allowed(d, p):
+            return d.army not in zoned or zones.get(p) in (None, d.army)
+
         left = dict(demand)
         free = []
         for d in group:
@@ -440,7 +446,7 @@ class Planner:
             if d.moving and d.dest in self._land_nb and ctrl[d.dest] in hostile:
                 continue  # an attack under way: let it finish
             p = self.hold.get(d.id)
-            if p in left and left[p] > 0:
+            if p in left and left[p] > 0 and allowed(d, p):
                 left[p] -= 1
                 orders.setdefault(d.id, p)
             else:
@@ -456,7 +462,7 @@ class Planner:
             if d.province not in dist_cache:
                 dist_cache[d.province] = self.bfs([d.province], reach)
             for p in posts:
-                if left[p] > 0 and p in dist_cache[d.province]:
+                if left[p] > 0 and p in dist_cache[d.province] and allowed(d, p):
                     pairs.append((dist_cache[d.province][p], d.id, p))
         pairs.sort()
         done = set()
@@ -466,12 +472,18 @@ class Planner:
             left[p] -= 1
             done.add(did)
             orders[did] = p
-        for d in free:  # all posts full or out of reach: join the nearest post anyway
+        load = collections.Counter(orders.get(d.id) for d in group)
+        for d in free:  # all posts full or out of reach: join the least crowded near post anyway (its own zone's)
             if d.id in done or d.province not in dist_cache:
                 continue
             dc = dist_cache[d.province]
-            near = [(dc[p], p) for p in posts if p in dc]
+            near = [(load[p] // self.s.max_stack, dc[p], p) for p in posts if p in dc and allowed(d, p)]
+            if not near and d.army in zoned:  # no post in its zone: stand in the zone's front provinces
+                near = [(load[p] // self.s.max_stack, 0, p) for p, a in zones.items() if a == d.army and p in own
+                        and any(ctrl[q] in hostile for q in self.nb(p))]
             if near:
-                orders[d.id] = min(near)[1]
+                p = min(near)[2]
+                orders[d.id] = p
+                load[p] += 1
                 done.add(d.id)
         return len(free) - len(done)

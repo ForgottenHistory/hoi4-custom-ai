@@ -252,7 +252,7 @@ def main():
     if a.group and not a.organize:
         army_order = group_armies
     leader_day = None
-    planned, executed = set(), False
+    planned, executed, zone_specs = set(), False, []
     if a.plans and group_armies and not a.dry_run:
         from hoi4ai.memory import Process
         provinces.refresh()
@@ -269,10 +269,15 @@ def main():
             armies = {aid: [d for d in divs0 if d.owner == tag and d.army == aid] for aid in planning}
             # where the game puts each percent of each border: measured with test lines on the fast army
             probe = group_armies[0]
-            borders = {f: plans.calibrate(proc, probe, f, [d.id for d in armies.get(probe, [])])
-                       for f in sorted({x.front for x in secs})}
-            borders = {f: b for f, b in borders.items() if b}
-            print("borders:", ", ".join(f"{f} ({len(b)} provinces)" for f, b in borders.items()))
+            # (+0x50 of a line may pick the CFront's section: try a few, keep what reaches new provinces)
+            borders, reached = {}, set()
+            for f in sorted({x.front for x in secs}):
+                for sel in (2, 1, 3, 0):
+                    b = plans.calibrate(proc, probe, f, [d.id for d in armies.get(probe, [])], sel=sel)
+                    if b and not set(b) <= reached:
+                        borders[(f, sel)] = b
+                        reached |= set(b)
+            print("borders:", ", ".join(f"{f} s={sel} ({len(b)} provinces)" for (f, sel), b in borders.items()))
             # each army on the border most of its divisions are nearest to
             near = {}
             todo = collections.deque()
@@ -292,8 +297,11 @@ def main():
                 if votes:
                     on[votes.most_common(1)[0][0]][aid] = ds
             for f, group in on.items():
-                for aid, ok, line in plans.draw(proc, plans.make(m, group, borders[f], f, vps, provinces.controller,
-                                                                 tgt, fast=group_armies[0], always=group_armies)):
+                laid = plans.make(m, group, borders[f], f, vps, provinces.controller, tgt, fast=group_armies[0],
+                                  always=group_armies)
+                zone_specs += [(aid, borders[f], start / plans.FULL, end / plans.FULL)
+                               for aid, _, start, end, _, _ in laid if aid != group_armies[0]]
+                for aid, ok, line in plans.draw(proc, laid):
                     print(line)
                     if ok:
                         planned.add(aid)
@@ -344,9 +352,11 @@ def main():
                     print(line)
                 executed = True
             # with --execute, divisions of armies on a battle plan are the game's to move
+            # each army with a front line holds its own stretch (where its plan is)
+            zone = plans.zones(m, zone_specs, provinces.controller, {me, *friend_ids}) if zone_specs else None
             orders, rep = planner.plan(provinces.controller,
                                        [d for d in divs if not (a.execute and d.owner == tag and d.army in planned)],
-                                       tag, enemy_ids, tgt, at_war, friend_ids)
+                                       tag, enemy_ids, tgt, at_war, friend_ids, zones=zone)
             mine = {d.id: d for d in divs if d.owner == tag}
             if membership and not a.dry_run:  # divisions that drifted out of their army go back
                 strays = collections.defaultdict(list)

@@ -104,16 +104,17 @@ def along(m, secs, own):
     return pos
 
 
-def calibrate(proc, army_id, front_id, division_ids, step=2000, width=4000):
+def calibrate(proc, army_id, front_id, division_ids, step=2000, width=4000, sel=2):
     """Where the game puts a front line for each stretch of a CFront: draw short test lines on ARMY_ID from 0% to
     100%, read back the border pairs each covers, delete them. (How the game measures the percent is its own
-    business; this measures it.) Returns {our border province: position 0..1}."""
+    business; this measures it.) SEL is the line's +0x50 (2 in every recorded line; it may pick a section).
+    Returns {our border province: position 0..1}."""
     ds = " ".join(map(str, division_ids))
     seen = collections.defaultdict(list)
     for start in range(0, FULL, step):
         end = min(FULL, start + width)
         before = {lid for lid, _ in lines(proc, army_id)}
-        if not send(f"bridge.plan front {army_id} {front_id} {start} {end} {ds}")[0].startswith("OK"):
+        if not send(f"bridge.plan front {army_id} {front_id} {start} {end} s={sel} {ds}")[0].startswith("OK"):
             continue
         new = [(lid, pairs) for lid, pairs in lines(proc, army_id) if lid not in before]
         for lid, pairs in new:
@@ -237,17 +238,40 @@ def clear(proc, army_ids):
 def draw(proc, plans):
     """Send the front lines, then each offensive line on its army's new front line. Returns [(army id, ok, line)]."""
     out = []
-    for aid, fid, start, end, tgt, dids in plans:
+    for aid, front, start, end, tgt, dids in plans:
+        fid, sel = front if isinstance(front, tuple) else (front, 2)
         ds = " ".join(map(str, dids))
         before = {lid for lid, _ in lines(proc, aid)}
-        r1 = send(f"bridge.plan front {aid} {fid} {start} {end} {ds}")[0]
+        r1 = send(f"bridge.plan front {aid} {fid} {start} {end} s={sel} {ds}")[0]
         new = [lid for lid, _ in lines(proc, aid) if lid not in before]
         if r1.startswith("OK") and new:
             r2 = send(f"bridge.plan arrow {aid} #{new[0]} {tgt} {ds}")[0]
         else:
             r2 = "-"
-        out.append((aid, r1.startswith("OK"), f"army {aid}: front {fid} {start / 1000:.0f}-{end / 1000:.0f}% "
+        out.append((aid, r1.startswith("OK"), f"army {aid}: front {fid} s={sel} {start / 1000:.0f}-{end / 1000:.0f}% "
                                                f"(line {new[0] if new else '?'}): {r1}; offensive to {tgt}: {r2}"))
+    return out
+
+
+def zones(m, specs, ctrl, ours):
+    """{province: army id}: each of our provinces in the zone of the army whose stretch of the border is nearest.
+    specs: [(army id, {border province: position}, lo, hi)]; the border moves in war, so every province of ours
+    takes the position of its nearest measured border province (through our land)."""
+    out = {}
+    for border in {id(b): b for _, b, _, _ in specs}.values():
+        pos = {p: v for p, v in border.items() if ctrl[p] in ours}
+        todo = collections.deque(pos)
+        while todo:
+            p = todo.popleft()
+            for n in m.neighbours.get(p, {}):
+                if n not in pos and m.is_land(n) and ctrl[n] in ours:
+                    pos[n] = pos[p]
+                    todo.append(n)
+        mine = [(aid, lo, hi) for aid, b, lo, hi in specs if b is border]
+        for p, v in pos.items():
+            for aid, lo, hi in mine:
+                if lo <= v <= hi:
+                    out.setdefault(p, aid)
     return out
 
 
