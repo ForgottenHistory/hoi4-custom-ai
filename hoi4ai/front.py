@@ -70,6 +70,7 @@ class Settings:
     max_support = 4
     support_route = 1.2        # support points only on routes at most this much dearer than the best
     max_stack = 6              # divisions per province we plan for (more starve: supply, attrition)
+    spill_reach = 8            # divisions left over when every post is full go to a front province this close
     axis_tie = 1.15            # fast army starts within this much of the best route compete on how they split the enemy
     sector_size = 3            # front provinces a force spreads over (its point and best neighbours)
     keep = 8                   # planning steps a chosen point is kept while it stays on the front
@@ -583,7 +584,7 @@ class Planner:
                    and not self.can_attack(d, s.fast_min_org)}
         report["resting"] = len(resting)
         for group, demand in ((line, line_demand), ([d for d in fast if d.id not in resting], fast_demand)):
-            unposted += self._assign(group, demand, own, attacking, ctrl, hostile, orders, zones)
+            unposted += self._assign(group, demand, own, attacking, ctrl, hostile, orders, zones, front)
         for did, p in orders.items():
             if did not in attacking:
                 self.hold[did] = p
@@ -597,7 +598,7 @@ class Planner:
                       max_stack=max(collections.Counter(d.province for d in mine).values(), default=0))
         return orders, report
 
-    def _assign(self, group, demand, own, attacking, ctrl, hostile, orders, zones=None):
+    def _assign(self, group, demand, own, attacking, ctrl, hostile, orders, zones=None, front=()):
         zoned = set(zones.values()) if zones else set()
 
         def allowed(d, p):
@@ -619,6 +620,9 @@ class Planner:
         if not free:
             return 0
         posts = [p for p in demand]
+        # more divisions than posts: the rest spread along the whole front (next to the enemy, where they pin it
+        # and can attack), least crowded first, instead of piling up on the nearest post
+        spill = [p for p in front if p in own and p not in demand]
         reach = own | set(posts)
         dist_cache, pairs = {}, []
         for d in free:
@@ -638,16 +642,23 @@ class Planner:
             done.add(did)
             orders[did] = p
         load = collections.Counter(orders.get(d.id) for d in group)
-        for d in free:  # all posts full or out of reach: join the least crowded near post anyway (its own zone's)
+        for d in free:  # all posts full or out of reach: the least crowded front province or post (its own zone's)
             if d.id in done or d.province not in dist_cache:
                 continue
             dc = dist_cache[d.province]
-            near = [(load[p] // self.s.max_stack, dc[p], p) for p in posts if p in dc and allowed(d, p)]
+            # nearby first; each division already there counts as two steps further (they spread locally). An
+            # army whose zone is full (the front moved on: its stretch may have one front province left) spills
+            # into nearby front provinces outside it rather than piling up on one
+            cands = [p for p in posts + [q for q in spill if dc.get(q, 99) <= self.s.spill_reach] if p in dc]
+            key = lambda p: (load[p] // self.s.max_stack, dc[p] + 2 * load[p], p)
+            near = [key(p) for p in cands if allowed(d, p)]
+            if not near or min(near)[0] > 0:
+                near += [key(p) for p in cands if not allowed(d, p)]
             if not near and d.army in zoned:  # no post in its zone: stand in the zone's front provinces
                 near = [(load[p] // self.s.max_stack, 0, p) for p, a in zones.items() if a == d.army and p in own
                         and any(ctrl[q] in hostile for q in self.nb(p))]
             if near:
-                p = min(near)[2]
+                p = min(near)[-1]
                 orders[d.id] = p
                 load[p] += 1
                 done.add(d.id)
