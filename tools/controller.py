@@ -14,6 +14,7 @@ import argparse
 import collections
 import datetime
 import json
+import math
 import os
 import re
 import time
@@ -27,6 +28,7 @@ from hoi4ai.live import Provinces
 import takeover
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+RAIL_MIN_PIXELS = 150  # before the war a division sent farther than this (map pixels, about 6 provinces) goes by rail
 MONTHS = {m: i for i, m in enumerate(["january", "february", "march", "april", "may", "june", "july", "august",
                                       "september", "october", "november", "december"], 1)}
 
@@ -357,6 +359,7 @@ def main():
             print("battle plans: no border with", target, "found" if not secs else "", "or no victory points")
     ticks = 0
     can_stop = send("bridge.stop")[0].startswith("FAIL usage: bridge.stop")
+    can_rail = send("bridge.rail")[0].startswith("FAIL usage: bridge.rail")
     print("stopping attacks with", "bridge.stop" if can_stop else "a move back to the division's own province")
     protected = set()
     war_start = None
@@ -429,7 +432,11 @@ def main():
                 if d is None or d.dest == prov or (d.province == prov and not d.moving):
                     continue
                 kind = "attack" if provinces.controller[prov] in set(enemy_ids) else "post"
-                cmds.append(f"bridge.move {did} {prov}")
+                pa, pb = m.provinces.get(d.province), m.provinces[prov]
+                if (can_rail and not at_war and kind == "post" and pa is not None
+                        and math.hypot(pa.x - pb.x, pa.y - pb.y) > RAIL_MIN_PIXELS):
+                    kind = "rail"  # a long way in peacetime: by train (strategic redeployment)
+                cmds.append(f"bridge.rail {did} {prov}" if kind == "rail" else f"bridge.move {did} {prov}")
                 batch.append((d, prov, kind))
             for d in planner.stops:  # attacks to call off
                 cmds.append(f"bridge.stop {d.id}" if can_stop else f"bridge.move {d.id} {d.province}")
@@ -437,6 +444,8 @@ def main():
             if cmds and not a.dry_run:
                 for i in range(0, len(cmds), 40):
                     for (d, prov, kind), r in zip(batch[i:i + 40], send(*cmds[i:i + 40])):
+                        if kind == "rail" and not r.startswith("OK"):  # no rail route: march
+                            kind, r = "post", send(f"bridge.move {d.id} {prov}")[0]
                         ok = r.startswith("OK")
                         sent += ok
                         failed += not ok
