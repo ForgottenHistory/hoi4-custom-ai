@@ -27,7 +27,7 @@ all the way; the AI tried to cancel it 103 times and to build German armies 1526
 
 | script | does |
 |---|---|
-| `tools/controller.py --tag GER --target POL [--armies]` | run the country's army with our planner (below); logs to `recordings/controller_*` (`--dry-run --once` to just see a plan) |
+| `tools/controller.py --tag GER --target POL [--organize] [--armies]` | `--organize` first builds the army structure (`hoi4ai/organize.py`): one fast army under the best attacking general, up to 4 infantry armies of at most 24 along the front, an army group of these under the best field marshal, and armies for the rest; run the country's army with our planner (below); logs to `recordings/controller_*` (`--dry-run --once` to just see a plan) |
 | `tools/heatmap.py [--tag GER --target POL]` | one planning step on the live game (sends nothing), drawn as a PNG: route costs to the goal, the fast army's sector and way, infantry support points, our infantry/fast divisions and enemy strength per province (`recordings/heatmaps/`) |
 | `tools/mapcheck.py [PROVINCE ..]` | build the map (through the active mods), print a province's neighbours, check it against the running game and count who controls what |
 | `tools/takeover.py [--armies] TAG` / `--release TAG` | take a country's land army from the AI (or give it back); `--armies` lets the game still form armies and pick generals and field marshals (their buffs), with fronts and plans blocked |
@@ -70,6 +70,9 @@ and live data from the running game's memory.
   Infantry support points only go on routes at most 1.2x the best; otherwise the infantry stands behind the
   fast army. Each connected piece of the territory our front runs along (our own, our subjects' and faction
   members') is planned on its own.
+- `leaders.py`: a country's generals and field marshals from the game (name, kind, attack, defence, planning,
+  logistics).
+- `organize.py`: the army structure a player sets up (one field marshal over a fast army and infantry armies).
 - `live.py`: every province's controller, owner and state in one pass (~35 ms).
 
 ## Findings so far (Germany vs Poland, 1939 start)
@@ -93,6 +96,8 @@ provinces with direct moves.
   `*(+0x1e0)+0xa4`, main sub-unit type `*(+0x128)+0x68` (std::string), destination +0x2a4 (0 = none), probably supply level +0x490 (100000 = full;
   72727 in a starving 23-division stack), order `*(+0xb0)+0xc`, organisation +0x20, strength +0x30 (fixed point, 100000 = 100%),
   template name `*(+0x3a8)+0x20`. Full object: path at +0x2c0, destination +0x2b4.
+- Unit leader (`CArmyLeader`, handle type 4713): name +0x40, key +0x20, country +0x120, kind +0xe7c (0 field
+  marshal, 1 general), skills attack +0xf58, defence +0xf68, planning +0xf78, logistics +0xf88.
 - Order (front / battle plan / army, type 53): owner +0x3c. Theatre (type 67): no owner field; its armies'
   list at +0x80 (owner of the first), divisions' list at +0x68.
 - Provinces: `CCurrentGameState` +0x2b0 is a vector of `CProvince*` indexed by province id. `CProvince`: id

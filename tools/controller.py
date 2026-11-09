@@ -18,7 +18,7 @@ import time
 
 import _bridge  # noqa: F401
 from hoi4bridge import BridgeError, query, send, trigger
-from hoi4ai import mapdata, units
+from hoi4ai import leaders as leaders_mod, mapdata, organize, units
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.front import Planner
 from hoi4ai.live import Provinces
@@ -72,6 +72,38 @@ def friends_of(tag):
     return _tags(lines)
 
 
+def build_structure(m, provinces, divs, tag, me, tgt, fast_units, friend_ids, cache):
+    """Build the armies, generals and the army group (hoi4ai/organize.py) with bridge.army. Returns a summary."""
+    lead = leaders_mod.load(tag, os.path.join(cache, "leaders.tsv"))
+    group, others, marshal = organize.plan(m, provinces.controller, divs, tag, me, tgt, fast_units, lead, friend_ids)
+    lines, group_ids = [], []
+    for army in group + others:
+        r = send("bridge.army create " + " ".join(str(d.id) for d in army.divisions))[0]
+        if not r.startswith("OK"):
+            lines.append(f"{army.role}: {r}")
+            continue
+        aid = int(r.split()[2])
+        if army in group:
+            group_ids.append(aid)
+        led = ""
+        if army.leader:
+            lr = send(f"bridge.army leader {aid} {army.leader.id}")[0]
+            led = f", {army.leader.name} (attack {army.leader.attack})" if lr.startswith("OK") else f", leader: {lr}"
+        lines.append(f"{army.role}: army {aid}, {len(army.divisions)} divisions{led}")
+    if len(group_ids) > 1:
+        r = send("bridge.army group " + " ".join(map(str, group_ids)))[0]
+        if r.startswith("OK"):
+            gid = int(r.split()[3])
+            fm = ""
+            if marshal:
+                lr = send(f"bridge.army leader {gid} {marshal.id}")[0]
+                fm = f", field marshal {marshal.name} (attack {marshal.attack})" if lr.startswith("OK") else f", field marshal: {lr}"
+            lines.append(f"army group {gid} of {len(group_ids)} armies{fm}")
+        else:
+            lines.append("army group: " + r)
+    return lines
+
+
 def enemies_of(tag):
     return _tags(query(f'{tag} = {{ every_enemy_country = {{ log = "[THIS.GetFlag]" }} }}'))
 
@@ -109,6 +141,8 @@ def main():
     ap.add_argument("--hours", type=int, default=4, help="in-game hours between planning steps")
     ap.add_argument("--dry-run", action="store_true", help="plan and log, send no moves")
     ap.add_argument("--once", action="store_true", help="one planning step, then stop")
+    ap.add_argument("--organize", action="store_true",
+                    help="build the army structure first: a fast army, infantry armies, an army group with a field marshal")
     ap.add_argument("--armies", action="store_true",
                     help="let the game form armies and pick generals (their buffs); fronts and plans stay blocked")
     ap.add_argument("--no-takeover", action="store_true", help="don't block the game AI's army commands")
@@ -129,6 +163,12 @@ def main():
     if not a.no_takeover and not a.dry_run:
         takeover.take(tag, armies=a.armies)
         print("took over", tag, "from the game AI" + (" (armies and generals left to the game)" if a.armies else ""))
+    if a.organize and not a.dry_run:
+        provinces.refresh()
+        friend_ids0 = [ids[t] for t in friends_of(tag) if t in ids]
+        for line in build_structure(m, provinces, snap.take(), tag, me, tgt, fast_units, friend_ids0,
+                                    os.path.join(REPO, ".cache")):
+            print("  " + line)
     protected = set()
     war_start = None
     last = None

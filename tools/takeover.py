@@ -25,7 +25,7 @@ ARMY_COMMANDS = [
     "COrderSetTrainingCommand", "COrderBlockSectionsCommand", "CSetOrderGroupExecutionTypeCommand",
     "CSetOrderGroupCohesionTypeCommand", "CEditAreaDefenseStateCommand", "CCreateAreaDefenseCommand",
     "CAssignToArmyGroupCommand", "CStrategicRedeploymentCommand", "CCancelMovementCommand", "CMoveCommand",
-    "CMassMoveCommand",
+    "CMassMoveCommand", "CSetArmyLeaderCommand",
     # these build the army structure (armies, army groups) in the country's theatre; owner via the theatre (67)
     "COrderGroupCommand", "CArmyGroupCommand",
 ]
