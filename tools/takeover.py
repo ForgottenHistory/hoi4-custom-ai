@@ -31,12 +31,19 @@ ARMY_COMMANDS = [
     # these build the army structure (armies, army groups) in the country's theatre; owner via the theatre (67)
     "COrderGroupCommand", "CArmyGroupCommand",
 ]
+# Classes whose army handle and its owner offset are known: an explicit rule, so a pointer in the command that happens
+# to read as some other country's handle can't make the auto rule miss (a few AI assignments got through that way).
+EXPLICIT = {
+    "COrderAssignCommand": "0x40 0x3c", "COrderUnassignCommand": "0x40 0x3c",
+    "COrderNewFrontCommand": "0x28 0x3c", "CSetArmyLeaderCommand": "0x30 0x3c",
+}
 ARMY_STRUCTURE = ["COrderGroupCommand", "CArmyGroupCommand", "CAssignToArmyGroupCommand"]
 
 
 def take(*tags, armies=False):
     """Block the AI's army commands for TAGS. armies=True leaves army structure (armies, generals) to the game."""
-    rules = [f"bridge.cmdblock rule {c} {'off' if armies and c in ARMY_STRUCTURE else 'auto'}" for c in ARMY_COMMANDS]
+    rules = [f"bridge.cmdblock rule {c} "
+             f"{'off' if armies and c in ARMY_STRUCTURE else EXPLICIT.get(c, 'auto')}" for c in ARMY_COMMANDS]
     replies = send(*rules, "bridge.cmdblock add " + " ".join(tags))
     bad = [r for r in replies if not r.startswith("OK")]
     if bad:
