@@ -4,9 +4,12 @@
   at a few support points along good routes and makes local attacks where it clearly outweighs the defenders.
 - Fast divisions (armour, motorised: see units.py) form one breakthrough army. Before the war it deploys at the
   start of the best route to the enemy's heart; at war it attacks along that route and keeps going (exploits),
-  always toward the cheapest way on to the goal.
+  always toward the cheapest way on to the nearest worthwhile objective. It only goes for the enemy's main body
+  (its largest connected piece of land); pockets are left to the infantry.
 - A route's cost counts terrain (plains cheap, forest and hills dear, marsh and mountains very dear) and the
-  defenders on it. The goal is the enemy's most valuable province (its capital in practice).
+  defenders on it, and rivers crossed. Objectives are the enemy's victory point provinces (what capitulation
+  counts); a bigger one pulls harder: a route ends at the objective with the lowest cost plus
+  OBJECTIVE_BASE / (1 + victory points / 5).
 
 Pure logic (no game calls). A Planner keeps state between calls (posts, chosen points, best organisation seen)
 so orders don't flap. plan() returns {division id: province} and a report; self.view holds what it saw.
@@ -20,7 +23,8 @@ TERRAIN_COST = {"plains": 1.0, "desert": 1.0, "urban": 1.5, "forest": 2.0, "hill
                 "marsh": 3.0, "mountain": 4.0}
 RIVER_COST = {0: 0.0, 1: 1.0, 2: 2.0}        # added to a route for crossing a small / large river
 RIVER_ATTACK = {0: 1.0, 1: 1.25, 2: 1.5}     # extra strength wanted to attack across one
-FULL_DIVISION = 80.0  # power (organisation x strength) of a fresh 1939 infantry division
+FULL_DIVISION = 80.0
+OBJECTIVE_BASE = 8.0  # power (organisation x strength) of a fresh 1939 infantry division
 
 
 def power(d):
@@ -79,13 +83,15 @@ class Planner:
     def terrain(self, p):
         return TERRAIN_COST.get(self.m.provinces[p].terrain, 2.0)
 
-    def routes(self, goal, allowed, foe_power):
-        """Cost from each province in ALLOWED to GOAL (Dijkstra), counting each province's terrain and defenders
-        on the way (the province itself included) and the rivers crossed."""
+    def routes(self, sources, allowed, foe_power):
+        """Cost from each province in ALLOWED to the cheapest of SOURCES ({province: starting cost}) (Dijkstra),
+        counting each province's terrain and defenders on the way (the province itself included) and the
+        rivers crossed."""
         def step(p):
             return self.terrain(p) * (1.0 + foe_power.get(p, 0.0) / FULL_DIVISION)
-        dist = {goal: step(goal)}
-        heap = [(dist[goal], goal)]
+        dist = {g: c0 + step(g) for g, c0 in sources.items() if g in allowed}
+        heap = [(c, g) for g, c in dist.items()]
+        heapq.heapify(heap)
         while heap:
             c, p = heapq.heappop(heap)
             if c > dist.get(p, math.inf):
@@ -124,19 +130,29 @@ class Planner:
         front = {p for p, f in facing.items() if f}
         main = {p for p in front if any(ctrl[q] == target for q in facing[p])}
 
-        goal = None
-        if target:
-            vps = [(v, p) for st in m.states.values() for p, v in st.victory_points.items()
-                   if p in land and ctrl[p] == target]
-            if vps:
-                goal = max(vps)[1]
         enemy_land = {p for p in land if ctrl[p] in hostile}
-        route = self.routes(goal, enemy_land, foe_power) if goal else {}
+        # objectives: the target's victory points; its main body: its largest connected piece of land
+        vps = {p: v for st in m.states.values() for p, v in st.victory_points.items()
+               if p in land and ctrl[p] == target} if target else {}
+        target_land = {p for p in enemy_land if ctrl[p] == target}
 
-        def route_from(p):
-            """Best route cost to the goal starting with an attack out of our province P."""
-            return min((route[t] + RIVER_COST[m.river(p, t)] for t in facing.get(p, ()) if t in route),
-                       default=math.inf)
+        def weight(piece):
+            return sum(vps.get(q, 0) for q in piece) + len(piece)
+        body, seen = set(), set()
+        for p in target_land:
+            if p not in seen:
+                piece = set(self.bfs([p], target_land))
+                seen |= piece
+                if weight(piece) > weight(body):
+                    body = piece
+        start = {p: OBJECTIVE_BASE / (1 + v / 5.0) for p, v in vps.items()}
+        route = self.routes(start, enemy_land, foe_power)  # infantry: every objective
+        fast_route = self.routes({p: c for p, c in start.items() if p in body}, enemy_land, foe_power)
+        goal = max((p for p in vps if p in body), key=vps.get, default=None)
+
+        def route_from(p, r=route):
+            """Best route cost to an objective starting with an attack out of our province P."""
+            return min((r[t] + RIVER_COST[m.river(p, t)] for t in facing.get(p, ()) if t in r), default=math.inf)
 
         # --- territory pieces connected by land (mainland, exclaves) are planned separately ------------------
         comp = {}
@@ -164,6 +180,8 @@ class Planner:
         for c, fr in front_in.items():
             score = {p: route_from(p) for p in fr if p in main}
             score = {p: v for p, v in score.items() if v < math.inf}
+            fscore = {p: route_from(p, fast_route) for p in fr if p in main}
+            fscore = {p: v for p, v in fscore.items() if v < math.inf}
             n_line, n_fast = line_in[c], fast_in[c]
             # infantry holds the line; if short, where the enemy is strongest, the main front first
             if n_line < len(fr):
@@ -175,15 +193,19 @@ class Planner:
                 reserves = n_line - len(fr)
             if not score:
                 continue
-            # the fast army: one sector, at the start of the best route
+            # the fast army: one sector, at the start of the best route into the enemy's main body
             fpts = [p for p, (k, _) in self.points.items() if k == "fast" and comp.get(p) == c]
-            if n_fast and not fpts:
-                best = min(score, key=score.get)
+            for b in fpts:  # drop a point that is no longer near the best route
+                if b not in fscore or fscore[b] > min(fscore.values()) * s.support_route:
+                    del self.points[b]
+            fpts = [b for b in fpts if b in self.points]
+            if n_fast and not fpts and fscore:
+                best = min(fscore, key=fscore.get)
                 self.points[best] = ("fast", s.keep)
                 fpts = [best]
             used = set()
             for b in fpts:
-                sec = self.sector(b, score)
+                sec = self.sector(b, fscore)
                 sectors[b] = ("fast", sec)
                 used.update(sec)
                 for i, q in enumerate(sec):
@@ -216,7 +238,7 @@ class Planner:
                         line_demand[q] = line_demand.get(q, 0) + per // len(sec) + (1 if i < per % len(sec) else 0)
 
         self.view = dict(front=front, main=main, goal=goal, foe_power=dict(foe_power), component=comp,
-                         route=route, front_route={p: route_from(p) for p in main}, sectors=sectors,
+                         route=route, fast_route=fast_route, objectives=vps, body=body, front_route={p: route_from(p) for p in main}, sectors=sectors,
                          line_demand=line_demand, fast_demand=fast_demand,
                          fast={d.id for d in fast})
 
@@ -254,10 +276,10 @@ class Planner:
                         report[label] += 1
                         report[label + "_divisions"] += len(chosen)
 
-            # the fast army first: wherever it stands, push along the cheapest way on to the goal
+            # the fast army first: wherever it stands, push along the cheapest way into the enemy's main body
             fast_at = {d.province for d in fast if d.id not in attacking}
-            fast_targets = sorted({t for p in fast_at for t in self.nb(p) if ctrl[t] in hostile and t in route},
-                                  key=route.get)
+            fast_targets = sorted({t for p in fast_at for t in self.nb(p) if ctrl[t] in hostile and t in fast_route},
+                                  key=fast_route.get)
             attack(fast_targets, self.is_fast, s.fast_margin, s.fast_min_org, False, "fast_attacks")
             # infantry: local attacks where clearly stronger; weak, open, on-route provinces first
             cands = {t for p in front for t in facing[p] if ctrl[t] == target}

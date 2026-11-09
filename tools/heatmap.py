@@ -151,14 +151,15 @@ def main():
     for b, (kind, sec) in v["sectors"].items():
         if kind != "fast":
             continue
-        cur = min((t for t in m.neighbours.get(b, ()) if t in route), key=route.get, default=None)
+        froute = v["fast_route"]
+        cur = min((t for t in m.neighbours.get(b, ()) if t in froute), key=froute.get, default=None)
         pts = [xy(b)]
         seen = set()
         while cur is not None and cur not in seen:
             seen.add(cur)
             pts.append(xy(cur))
-            nxt = min((n for n in m.neighbours.get(cur, ()) if n in route), key=route.get, default=None)
-            cur = nxt if nxt is not None and route[nxt] < route[cur] else None
+            nxt = min((n for n in m.neighbours.get(cur, ()) if n in froute), key=froute.get, default=None)
+            cur = nxt if nxt is not None and froute[nxt] < froute[cur] else None
         for d in (d1, d2):
             d.line(pts, fill=(120, 0, 160), width=max(3, 2 * scale))
     for b, (kind, sec) in v["sectors"].items():
@@ -168,10 +169,11 @@ def main():
             r = (9 if i == 0 else 6) * scale
             for d in (d1, d2):
                 d.ellipse((x - r, y - r, x + r, y + r), outline=colour, width=max(2, scale) if i == 0 else max(1, scale // 2 + 1))
-    if v["goal"]:
-        x, y = xy(v["goal"])
+    for p, vp in v["objectives"].items():  # victory points: a star, bigger for more
+        x, y = xy(p)
+        r = (2 + min(6, vp / 4)) * scale
         for d in (d1, d2):
-            d.text((x, y - 10 * scale), "*", fill=(0, 0, 0), font=f_big, anchor="mm")
+            d.regular_polygon((x, y - 8 * scale, r), 5, fill=(255, 215, 0), outline=(0, 0, 0))
     for p, n in count.items():
         f = fast_n.get(p, 0)
         label = "%d+%d" % (n - f, f) if f else str(n)
@@ -188,8 +190,9 @@ def main():
     war = "at war" if tgt in enemies else "not at war"
     d.text((10, 8), f"{tag} vs {target}, {now:%d %b %Y %H:00}, {war}: {rep['divisions']} divisions ({rep['fast']} fast), "
                     f"front {rep['front']}; purple = fast army sector and its way, black = infantry support points, "
-                    f"* = {target}'s top victory point", fill=(0, 0, 0), font=f_big)
-    d.text((10, 40), "Routes: cost to the goal (terrain x defenders), cheap = dark; our front: best route from there",
+                    f"stars = {target}'s victory points", fill=(0, 0, 0), font=f_big)
+    d.text((10, 40), "Routes to victory points (terrain x defenders, rivers), cheap = dark; "
+           "our front: best route out",
            fill=(60, 60, 60), font=f_small)
     d.text((img1.width + 20, 40), "Forces: infantry+fast per province (purple = fast there), "
                                   "enemy organisation x strength (red)", fill=(60, 60, 60), font=f_small)

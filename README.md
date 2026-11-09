@@ -59,9 +59,11 @@ and live data from the running game's memory.
 - `front.py`: the planner, after how a player runs an offensive. Infantry holds every province facing the
   enemy, gathers its reserves at a few support points, and attacks locally where clearly stronger. The fast
   divisions form one breakthrough army: before the war it deploys at the start of the best route to the
-  enemy's top victory point, at war it attacks along that route and keeps pushing on the cheapest way. A
+  enemy's victory points, at war it attacks along that route and keeps pushing on the cheapest way. It only
+  goes for the enemy's main body (its largest connected piece of land); pockets are left to the infantry. A
   route's cost counts terrain (plains 1, urban 1.5, forest and hills 2, marsh and jungle 3, mountains 4),
-  defenders, and rivers crossed (+1 small, +2 large; attacks across them want 25% / 50% more strength).
+  defenders, and rivers crossed; a route ends at the victory point with the lowest cost plus 8 / (1 + VP / 5),
+  so bigger victory points pull harder (+1 small, +2 large; attacks across them want 25% / 50% more strength).
   Infantry support points only go on routes at most 1.2x the best; otherwise the infantry stands behind the
   fast army. Each connected piece of the territory our front runs along (our own, our subjects' and faction
   members') is planned on its own.
