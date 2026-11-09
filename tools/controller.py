@@ -203,7 +203,7 @@ def main():
             last = now
             t0 = time.time()
             ticks += 1
-            if group_id and ticks % 6 == 0:
+            if group_id:
                 r = keep_in_group(group_id, group_armies)
                 if not r.startswith(f"OK {len(group_armies)} of"):
                     print("army group:", r)

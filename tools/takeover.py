@@ -26,6 +26,8 @@ ARMY_COMMANDS = [
     "CSetOrderGroupCohesionTypeCommand", "CEditAreaDefenseStateCommand", "CCreateAreaDefenseCommand",
     "CAssignToArmyGroupCommand", "CStrategicRedeploymentCommand", "CCancelMovementCommand", "CMoveCommand",
     "CMassMoveCommand", "CSetArmyLeaderCommand",
+    # these take armies out of our army group or move them between theatres (army lists: owner via bridge.cmdrec list rules)
+    "CRemoveFromArmyGroupCommand", "CMoveArmiesInTheaterCommand", "CMoveArmyGroupInTheaterCommand",
     # these build the army structure (armies, army groups) in the country's theatre; owner via the theatre (67)
     "COrderGroupCommand", "CArmyGroupCommand",
 ]
