@@ -109,6 +109,8 @@ def main():
     ap.add_argument("--hours", type=int, default=4, help="in-game hours between planning steps")
     ap.add_argument("--dry-run", action="store_true", help="plan and log, send no moves")
     ap.add_argument("--once", action="store_true", help="one planning step, then stop")
+    ap.add_argument("--armies", action="store_true",
+                    help="let the game form armies and pick generals (their buffs); fronts and plans stay blocked")
     ap.add_argument("--no-takeover", action="store_true", help="don't block the game AI's army commands")
     a = ap.parse_args()
     tag, target = a.tag.upper(), a.target.upper()
@@ -125,8 +127,8 @@ def main():
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     log = Log(os.path.join(REPO, "recordings", f"controller_{tag}_{stamp}"))
     if not a.no_takeover and not a.dry_run:
-        takeover.take(tag)
-        print("took over", tag, "from the game AI")
+        takeover.take(tag, armies=a.armies)
+        print("took over", tag, "from the game AI" + (" (armies and generals left to the game)" if a.armies else ""))
     protected = set()
     war_start = None
     last = None

@@ -27,10 +27,10 @@ all the way; the AI tried to cancel it 103 times and to build German armies 1526
 
 | script | does |
 |---|---|
-| `tools/controller.py --tag GER --target POL` | run the country's army with our planner (below); logs to `recordings/controller_*` (`--dry-run --once` to just see a plan) |
+| `tools/controller.py --tag GER --target POL [--armies]` | run the country's army with our planner (below); logs to `recordings/controller_*` (`--dry-run --once` to just see a plan) |
 | `tools/heatmap.py [--tag GER --target POL]` | one planning step on the live game (sends nothing), drawn as a PNG: route costs to the goal, the fast army's sector and way, infantry support points, our infantry/fast divisions and enemy strength per province (`recordings/heatmaps/`) |
 | `tools/mapcheck.py [PROVINCE ..]` | build the map (through the active mods), print a province's neighbours, check it against the running game and count who controls what |
-| `tools/takeover.py TAG` / `--release TAG` | take a country's land army from the AI (or give it back) |
+| `tools/takeover.py [--armies] TAG` / `--release TAG` | take a country's land army from the AI (or give it back); `--armies` lets the game still form armies and pick generals and field marshals (their buffs), with fronts and plans blocked |
 | `tools/cmdrec.py [--dir FOLDER] [--tag TAG]` | record every command the game executes, with the in-game date, and a daily snapshot of every division; Ctrl+C stops |
 | `tools/analyze_cmdrec.py RECORD [--countries ..]` | per country: commands by kind, orders touched, where divisions are sent (moves, rail), assignment churn |
 | `tools/analyze_snaps.py [SNAPSHOTS] [--countries ..]` | per country and day: divisions, strength, organisation, divisions moved, in plans, lost |
