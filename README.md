@@ -57,7 +57,8 @@ and live data from the running game's memory.
   one its counter shows) is armour, or mobile with a transport (motorised, mechanised) or no speed malus.
 - `pdx.py`: a small parser for the game's script files.
 - `front.py`: the planner, after how a player runs an offensive. Infantry holds every province facing the
-  enemy, gathers its reserves at a few support points, and attacks locally where clearly stronger. The fast
+  enemy; half its reserves back the fast army (its shoulders), half go to a few support points, filling nearby
+  front provinces before going deep; it attacks locally where clearly stronger. The fast
   divisions form one breakthrough army: before the war it deploys at the start of the best route to the
   enemy's victory points, at war it attacks along that route and keeps pushing on the cheapest way. It only
   goes for the enemy's main body (its largest connected piece of land); pockets are left to the infantry. A

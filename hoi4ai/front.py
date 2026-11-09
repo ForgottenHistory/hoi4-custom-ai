@@ -1,7 +1,9 @@
 """Army planning, after how a player runs an offensive (Germany vs Poland, 1939):
 
-- Infantry holds the line: one division on every province facing the enemy; the rest of the infantry gathers
-  at a few support points along good routes and makes local attacks where it clearly outweighs the defenders.
+- Infantry holds the line: one division on every province facing the enemy. Half the rest stands behind the
+  fast army to follow and widen its breach, the other half at a few support points along good routes; reserves
+  fill nearby front provinces before going deep. Infantry attacks locally where it clearly outweighs the
+  defenders.
 - Fast divisions (armour, motorised: see units.py) form one breakthrough army. Before the war it deploys at the
   start of the best route to the enemy's heart; at war it attacks along that route and keeps going (exploits),
   always toward the cheapest way on to the main objective: the most valuable province of the enemy's main body
@@ -123,13 +125,15 @@ class Planner:
                     right += f
         return min(left, right)
 
-    def place(self, b, n, score, own, load, demand):
-        """Put N divisions at point B: its sector first, then the provinces behind it, nearest first, at most
-        max_stack per province counting what LOAD already has there. Adds to DEMAND; returns the provinces."""
+    def place(self, b, n, score, own, load, demand, front=()):
+        """Put N divisions at point B: its sector first, then nearby FRONT provinces, then the provinces behind,
+        nearest first, at most max_stack per province counting what LOAD already has there. Adds to DEMAND;
+        returns the provinces."""
         sec = self.sector(b, score)
         order = list(sec)
         dist = self.bfs(sec, own)
-        order += sorted((q for q in dist if q not in sec), key=lambda q: (dist[q], score.get(q, math.inf)))
+        order += sorted((q for q in dist if q not in sec),
+                        key=lambda q: (q not in front, dist[q], score.get(q, math.inf)))
         used = []
         for q in order:
             if n <= 0:
@@ -249,7 +253,7 @@ class Planner:
             used = set()
             load = dict(line_demand)  # holders already stand there
             for b in fpts:
-                placed = self.place(b, math.ceil(n_fast / len(fpts)), fscore, own, load, fast_demand)
+                placed = self.place(b, math.ceil(n_fast / len(fpts)), fscore, own, load, fast_demand, front)
                 sectors[b] = ("fast", placed)
                 used.update(self.sector(b, fscore))
             # infantry support points: along the next best routes of the main axis, apart from each other and
@@ -271,12 +275,18 @@ class Planner:
                 self.points[p] = ("support", s.keep)
                 spts.append(p)
                 used.update(sec)
-            if reserves and not spts:  # no good route left for support: stand behind the fast army
-                spts = list(fpts)
-            if spts and reserves:
-                per = math.ceil(reserves / len(spts))
+            # half the reserve infantry backs the fast army (its shoulders: to follow and widen the breach), the
+            # rest goes to the support points (or also to the fast army if there are none)
+            behind = reserves if not spts else (reserves // 2 if fpts else 0)
+            if fpts and behind:
+                per = math.ceil(behind / len(fpts))
+                for b in fpts:
+                    placed = self.place(b, per, fscore, own, load, line_demand, front)
+                    sectors[b] = ("fast", sorted(set(sectors[b][1]) | set(placed)))
+            if spts and reserves - behind:
+                per = math.ceil((reserves - behind) / len(spts))
                 for b in spts:
-                    placed = self.place(b, per, score, own, load, line_demand)
+                    placed = self.place(b, per, score, own, load, line_demand, front)
                     sectors.setdefault(b, ("support", placed))
 
         self.view = dict(front=front, main=main, goal=goal, foe_power=dict(foe_power), component=comp,
