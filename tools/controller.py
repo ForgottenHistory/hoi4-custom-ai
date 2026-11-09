@@ -538,7 +538,7 @@ def main():
                 rec.step(now, divs, ctrl, enemy_tags, at_war, capitulated)
                 send(f"bridge.cmdrec mark date={row['date']}")
             print(f"{row['date']} war={row['at_war']} divs={rep['divisions']} front={rep['front']} "
-                  f"fast={rep['fast']} attacks={rep.get('fast_attacks', 0)}+{rep.get('attacks', 0)} drives={rep.get('drives', 0)} resting={rep.get('resting', 0)} moves={sent} fail={failed} "
+                  f"fast={rep['fast']} attacks={rep.get('fast_attacks', 0)}+{rep.get('attacks', 0)} drives={rep.get('drives', 0)}+{rep.get('infantry_drives', 0)} resting={rep.get('resting', 0)} moves={sent} fail={failed} "
                   f"taken={taken}/{len(target_land)} short_of_supply={rep['short_of_supply']} ({row['ms']} ms)")
             if a.once:
                 for did, prov in list(orders.items())[:15]:

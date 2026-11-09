@@ -12,6 +12,9 @@
   (a province worth having: a victory point, a supply hub, a railway, or just land), the best value for the
   distance through empty land, and keeps that target until it is ours or defended. A worn-out fast division
   rests where it stands instead of walking back to the breach.
+- The infantry floods empty enemy land too (a breach, an emptied pocket): free infantry, nearest first, up to a
+  few provinces deep; one division stays on every front province still facing defenders, and only part of the
+  free infantry goes each step, so a reserve is left for the next breach.
 - Among near-equal routes the fast army takes the one whose line to the objective leaves the most enemy
   strength on its weaker side: the thrust that cuts the enemy's army most evenly in two.
 - A route's cost counts terrain (plains cheap, forest and hills dear, marsh and mountains very dear) and the
@@ -41,7 +44,10 @@ def power(d):
 
 
 class Settings:
-    attack_margin = 1.6        # infantry attacks when its power >= margin x enemy power x terrain cost
+    attack_margin = 1.3        # infantry attacks when its power >= margin x enemy power x terrain cost (a player
+                               # had twice our divisions fighting in the first days)
+    infantry_reach = 4         # infantry drives into empty enemy land up to this many provinces away
+    infantry_drive_share = 0.5  # share of the free infantry that may start a drive each step
     fast_margin = 1.1          # the same for the fast army
     armor_factor = 1.8         # an armoured division (main unit in the armor group) counts this much more when it
                                # attacks: its armour against defenders with little piercing (1939 infantry)
@@ -49,6 +55,9 @@ class Settings:
     fast_min_org = 0.40
     stop_org = 0.30            # an attacker below this share of its best organisation stops attacking
     attack_floor = 10000       # no attack below 10 organisation, whatever the share
+    fast_overkill = 6.0        # an attack takes up to this many times the strength it needs (cap permitting):
+                               # for the fast army about everyone next to the province (its power is overrated)
+    infantry_overkill = 2.0
     fast_cap = 5               # fast divisions sent at one province (the rest look for other openings)
     infantry_cap = 6           # infantry divisions sent at one province
     fast_reach = 6.0           # fast army: how fast a victory point's pull fades with route cost
@@ -395,7 +404,9 @@ class Planner:
                 if d.moving and d.dest in land and ctrl[d.dest] in hostile:
                     under_way[d.dest].append(d)
 
-            def attack(targets, eligible, margin, min_org, keep_home, label, cap):
+            def attack(targets, eligible, margin, min_org, keep_home, label, cap, overkill=1.0):
+                # NEED (margin x defenders x terrain) decides whether to attack; then up to OVERKILL x NEED is sent,
+                # within CAP: more attackers end a battle sooner (a player sends what stands next to the province)
                 for t in targets:
                     already = sum(self.attack_power(d) for d in under_way[t])
                     room = cap - len(under_way[t])
@@ -412,11 +423,11 @@ class Planner:
                     # attacked across the worst river among the provinces we attack from
                     rv = max((m.river(d.province, t) for d in pool), default=0)
                     need = foe_power[t] * self.terrain(t) * margin * RIVER_ATTACK[rv]
-                    if under_way[t] and already > need:
+                    if under_way[t] and already > need * overkill:
                         continue  # enough on the way
                     chosen, total = [], already
                     for d in pool:
-                        if (total > need and chosen) or len(chosen) >= room:
+                        if (total > need * overkill and chosen) or len(chosen) >= room:
                             break
                         chosen.append(d)
                         total += self.attack_power(d)
@@ -436,7 +447,8 @@ class Planner:
             fast_at = {d.province for d in fast if d.id not in attacking}
             fast_targets = sorted({t for p in fast_at for t in self.nb(p)
                                    if ctrl[t] in hostile and t in fast_route and forward(t)}, key=fast_route.get)
-            attack(fast_targets, self.is_fast, s.fast_margin, s.fast_min_org, False, "fast_attacks", s.fast_cap)
+            attack(fast_targets, self.is_fast, s.fast_margin, s.fast_min_org, False, "fast_attacks", s.fast_cap,
+                   s.fast_overkill)
             # exploitation: a ready fast division not in a fight drives into empty enemy land, each to its own target
             empty = {p for p in enemy_land if foe_power[p] == 0 and forward(p)}
             passable = own | empty
@@ -470,7 +482,53 @@ class Planner:
             cands = {t for p in front for t in facing[p] if ctrl[t] == target}
             ranked = sorted(cands, key=lambda t: (foe_power[t] + 10) * self.terrain(t) + route.get(t, 99) / 10)
             attack(ranked, lambda d: not self.is_fast(d), s.attack_margin, s.attack_min_org, True, "attacks",
-                   s.infantry_cap)
+                   s.infantry_cap, s.infantry_overkill)
+            # infantry exploitation: once there is empty enemy land (a breach, a pocket emptied), free infantry
+            # floods it, nearest first, so the enemy can't close the gap; one division stays on every front province
+            # that still faces defenders, and at most a share of the free infantry goes each step (the rest is the
+            # reserve for the next breach)
+            open_land = {p for p in enemy_land if foe_power[p] == 0}
+            if open_land:
+                passable_inf = own | open_land
+                to_open = self.bfs(list(open_land), passable_inf)  # steps to the nearest empty enemy province
+                held = set()
+                free = []
+                for d in sorted(line, key=power):
+                    if d.id in attacking or d.province not in own or not self.can_attack(d, s.attack_min_org):
+                        continue
+                    if d.moving and d.dest in land and ctrl[d.dest] in hostile:
+                        continue
+                    p = d.province
+                    if p in front and any(foe_power[q] > 0 for q in facing[p]) and p not in held:
+                        held.add(p)  # the weakest stays and holds; the stronger ones may go
+                        continue
+                    if to_open.get(p, 99) <= s.infantry_reach:
+                        free.append(d)
+                free.sort(key=lambda d: to_open[d.province])
+                claimed_inf = {d.dest for d in mine if d.moving and d.dest in open_land}
+                for d in free[:math.ceil(len(free) * s.infantry_drive_share)]:
+                    t = self.drive.get(d.id)
+                    if t not in open_land or t in claimed_inf:
+                        dist = {d.province: 0}
+                        q = collections.deque([d.province])
+                        while q:
+                            p = q.popleft()
+                            if dist[p] < s.infantry_reach:
+                                for n in self.nb(p):
+                                    if n not in dist and n in passable_inf:
+                                        dist[n] = dist[p] + 1
+                                        q.append(n)
+                        cands = [((1 + value(x)) / (1 + dist[x]) ** 2, x) for x in dist
+                                 if x in open_land and x not in claimed_inf]
+                        t = max(cands)[1] if cands else None
+                    if t is None:
+                        self.drive.pop(d.id, None)
+                        continue
+                    self.drive[d.id] = t
+                    claimed_inf.add(t)
+                    orders[d.id] = t
+                    attacking.add(d.id)
+                    report["infantry_drives"] += 1
 
         # stop attacks: a worn-out attacker, or everyone on a province we no longer outweigh (a player's micro)
         self.stops = []
