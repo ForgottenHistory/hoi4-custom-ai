@@ -52,8 +52,8 @@ and live data from the running game's memory.
   game state (`CCurrentGameState`), using the static the exe keeps only when RTTI confirms it, else by class
   name.
 - `divisions.py`: every division (owner, province, destination, organisation, strength, template) via `bridge.snap`.
-- `front.py`: the planner. Each connected piece of the territory we may stand on (our own, subjects', allies',
-  faction members) holds every province facing the enemy with one division. Its reserves mass at a few
+- `front.py`: the planner. Each connected piece of the territory we may stand on (our own, our subjects'
+  and faction members') holds every province facing the enemy with one division. Its reserves mass at a few
   breakthrough points facing weak, open, valuable enemy provinces, toward the enemy's top victory point; each
   breakthrough force spreads over a sector (the point and its two best neighbours on the front), so it can
   attack from several sides.
