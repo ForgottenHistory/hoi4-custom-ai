@@ -4,12 +4,14 @@
   at a few support points along good routes and makes local attacks where it clearly outweighs the defenders.
 - Fast divisions (armour, motorised: see units.py) form one breakthrough army. Before the war it deploys at the
   start of the best route to the enemy's heart; at war it attacks along that route and keeps going (exploits),
-  always toward the cheapest way on to the nearest worthwhile objective. It only goes for the enemy's main body
-  (its largest connected piece of land); pockets are left to the infantry.
+  always toward the cheapest way on to the main objective: the most valuable province of the enemy's main body
+  (its largest connected piece of land; pockets are left to the infantry).
+- Among near-equal routes the fast army takes the one whose line to the objective leaves the most enemy
+  strength on its weaker side: the thrust that cuts the enemy's army most evenly in two.
 - A route's cost counts terrain (plains cheap, forest and hills dear, marsh and mountains very dear) and the
-  defenders on it, and rivers crossed. Objectives are the enemy's victory point provinces (what capitulation
-  counts); a bigger one pulls harder: a route ends at the objective with the lowest cost plus
-  OBJECTIVE_BASE / (1 + victory points / 5).
+  defenders on it, and rivers crossed. The infantry's local attacks lean toward the nearest victory point
+  (a bigger one pulls harder: a route ends where the cost plus OBJECTIVE_BASE / (1 + victory points / 5) is
+  lowest). The fast army and the infantry reserves follow the main axis.
 
 Pure logic (no game calls). A Planner keeps state between calls (posts, chosen points, best organisation seen)
 so orders don't flap. plan() returns {division id: province} and a report; self.view holds what it saw.
@@ -41,6 +43,7 @@ class Settings:
     support_every = 10         # one infantry support point per this many reserve infantry divisions
     max_support = 4
     support_route = 1.2        # support points only on routes at most this much dearer than the best
+    axis_tie = 1.15            # fast army starts within this much of the best route compete on how they split the enemy
     sector_size = 3            # front provinces a force spreads over (its point and best neighbours)
     keep = 8                   # planning steps a chosen point is kept while it stays on the front
 
@@ -104,6 +107,21 @@ class Planner:
                         heapq.heappush(heap, (nc, n))
         return dist
 
+    def split(self, start, goal, foe_power, land):
+        """Enemy strength on the weaker side of the line from START to GOAL: a thrust along it cuts the enemy's
+        army in two, and the more even the halves, the more it cuts off."""
+        pv = self.m.provinces
+        sx, sy, gx, gy = pv[start].x, pv[start].y, pv[goal].x, pv[goal].y
+        left = right = 0.0
+        for q, f in foe_power.items():
+            if q in land:
+                side = (gx - sx) * (pv[q].y - sy) - (gy - sy) * (pv[q].x - sx)
+                if side > 0:
+                    left += f
+                else:
+                    right += f
+        return min(left, right)
+
     def sector(self, b, score):
         """B and its best-scoring neighbours on the same front (SCORE: lower is better)."""
         nbs = sorted((n for n in self.nb(b) if n in score), key=score.get)
@@ -146,9 +164,10 @@ class Planner:
                 if weight(piece) > weight(body):
                     body = piece
         start = {p: OBJECTIVE_BASE / (1 + v / 5.0) for p, v in vps.items()}
-        route = self.routes(start, enemy_land, foe_power)  # infantry: every objective
-        fast_route = self.routes({p: c for p, c in start.items() if p in body}, enemy_land, foe_power)
+        route = self.routes(start, enemy_land, foe_power)  # infantry's local attacks: the nearest objective
+        # the main axis (fast army, infantry reserves): the most valuable province of the enemy's main body
         goal = max((p for p in vps if p in body), key=vps.get, default=None)
+        fast_route = self.routes({goal: 0.0}, enemy_land, foe_power) if goal else {}
 
         def route_from(p, r=route):
             """Best route cost to an objective starting with an attack out of our province P."""
@@ -200,7 +219,10 @@ class Planner:
                     del self.points[b]
             fpts = [b for b in fpts if b in self.points]
             if n_fast and not fpts and fscore:
-                best = min(fscore, key=fscore.get)
+                # near-equal routes: the one that splits the enemy's army most evenly
+                low = min(fscore.values())
+                near = [p for p, v in fscore.items() if v <= low * s.axis_tie]
+                best = max(near, key=lambda p: (self.split(p, goal, foe_power, target_land), -fscore[p]))
                 self.points[best] = ("fast", s.keep)
                 fpts = [best]
             used = set()
@@ -210,7 +232,9 @@ class Planner:
                 used.update(sec)
                 for i, q in enumerate(sec):
                     fast_demand[q] = fast_demand.get(q, 0) + n_fast // len(sec) + (1 if i < n_fast % len(sec) else 0)
-            # infantry support points: along the next best routes, apart from each other and the fast sector
+            # infantry support points: along the next best routes of the main axis, apart from each other and
+            # from the fast sector
+            score = fscore or score
             spts = [p for p, (k, _) in self.points.items() if k == "support" and comp.get(p) == c]
             for b in spts:
                 used.update(self.sector(b, score))
@@ -238,7 +262,8 @@ class Planner:
                         line_demand[q] = line_demand.get(q, 0) + per // len(sec) + (1 if i < per % len(sec) else 0)
 
         self.view = dict(front=front, main=main, goal=goal, foe_power=dict(foe_power), component=comp,
-                         route=route, fast_route=fast_route, objectives=vps, body=body, front_route={p: route_from(p) for p in main}, sectors=sectors,
+                         route=fast_route, near_route=route, fast_route=fast_route, objectives=vps, body=body,
+                         front_route={p: route_from(p, fast_route) for p in main}, sectors=sectors,
                          line_demand=line_demand, fast_demand=fast_demand,
                          fast={d.id for d in fast})
 
