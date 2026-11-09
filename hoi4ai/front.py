@@ -419,12 +419,16 @@ class Planner:
                         report[label + "_divisions"] += len(chosen)
 
             # the fast army first: wherever it stands, push along the cheapest way into the enemy's main body
+            # the fast army leaves pockets to the infantry: it fights and drives only into the enemy's main body
+            # (and other enemies' land), where its speed counts; light tanks and motorised are no assault troops
+            def forward(t):
+                return t in body or (ctrl[t] in hostile and ctrl[t] != target)
             fast_at = {d.province for d in fast if d.id not in attacking}
-            fast_targets = sorted({t for p in fast_at for t in self.nb(p) if ctrl[t] in hostile and t in fast_route},
-                                  key=fast_route.get)
+            fast_targets = sorted({t for p in fast_at for t in self.nb(p)
+                                   if ctrl[t] in hostile and t in fast_route and forward(t)}, key=fast_route.get)
             attack(fast_targets, self.is_fast, s.fast_margin, s.fast_min_org, False, "fast_attacks", s.fast_cap)
             # exploitation: a ready fast division not in a fight drives into empty enemy land, each to its own target
-            empty = {p for p in enemy_land if foe_power[p] == 0}
+            empty = {p for p in enemy_land if foe_power[p] == 0 and forward(p)}
             passable = own | empty
             claimed = {d.dest for d in mine if d.moving and d.dest in empty}
             drivers = [d for d in fast if d.id not in attacking and d.province in passable
