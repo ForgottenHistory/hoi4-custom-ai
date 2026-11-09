@@ -26,7 +26,8 @@ class Division:
         self.id, self.owner, self.province, self.dest = did, owner, province, dest
         self.org, self.strength, self.template, self.unit, self.supply = org, strength, template, unit, supply
         self.army = army
-        self.max_org = max_org  # 0: not known        self.path, self.next = path, nxt if path else 0  # the next province, 0 when not moving
+        self.max_org = max_org  # 0: not known
+        self.path, self.next = path, nxt if path else 0  # the next province, 0 when not moving
 
     @property
     def moving(self):
