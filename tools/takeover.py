@@ -30,6 +30,9 @@ ARMY_COMMANDS = [
     "CRemoveFromArmyGroupCommand", "CMoveArmiesInTheaterCommand", "CMoveArmyGroupInTheaterCommand",
     # these build the army structure (armies, army groups) in the country's theatre; owner via the theatre (67)
     "COrderGroupCommand", "CArmyGroupCommand",
+    # these remove or replace an army's front lines, running other commands' Execute directly (seen only with a bridge
+    # that hooks "...Commands" classes too): the AI reshaping our plans in observe mode
+    "COrderRemoveRootCommands", "COrderReplaceRootCommands", "COrderReplaceFallbackCommands",
 ]
 # Classes whose army handle and its owner offset are known: an explicit rule, so a pointer in the command that happens
 # to read as some other country's handle can't make the auto rule miss (a few AI assignments got through that way).
