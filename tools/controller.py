@@ -1,6 +1,7 @@
 """Run a country's army with our own planner (hoi4ai/front.py) instead of the game's AI.
 
     python tools/controller.py --tag GER --target POL [--hours 4] [--dry-run] [--no-takeover]
+    python tools/controller.py --tag POL --target GER --defend
 
 Start a new game, `observe` (or play another country), pause, then run this. It takes the country's army away
 from the game AI (tools/takeover.py), then every --hours in-game hours: reads every division and who controls
@@ -9,6 +10,10 @@ and sends the moves. Its divisions are protected from the AI cancelling their mo
 
 Logs to recordings/controller_<TAG>_<time>/: ticks.tsv (one line per planning step) and moves.tsv (every move
 sent). Stops with Ctrl+C, or when the target capitulates.
+
+--defend: TAG defends against TARGET (and its friends that border TAG) with hoi4ai/defend.py instead: one line
+(hoi4ai/defence.py), a reserve behind it, a new line when it breaks. Stops when TAG capitulates. The war is
+recorded from the attacker's side, like a recording of TARGET attacking TAG (tools/compare_runs.py).
 """
 import argparse
 import collections
@@ -21,7 +26,7 @@ import time
 
 import _bridge  # noqa: F401
 from hoi4bridge import BridgeError, BridgeUnavailable, query, send, trigger
-from hoi4ai import leaders as leaders_mod, mapdata, organize, plans, units
+from hoi4ai import defence, defend, leaders as leaders_mod, mapdata, organize, plans, templates, units
 from hoi4ai.battlerec import BattleRecorder
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.front import Planner
@@ -252,7 +257,10 @@ def main():
                     help="let the game form armies and pick generals (their buffs); fronts and plans stay blocked")
     ap.add_argument("--no-takeover", action="store_true", help="don't block the game AI's army commands")
     ap.add_argument("--no-record", action="store_true", help="don't record the war (hoi4ai/battlerec.py)")
+    ap.add_argument("--defend", action="store_true", help="TAG defends against TARGET (hoi4ai/defend.py)")
     a = ap.parse_args()
+    if a.defend and (a.organize or a.plans or a.group):
+        raise SystemExit("--defend runs without --organize, --plans or --group")
     if not a.dry_run:
         _lock()
     tag, target = a.tag.upper(), a.target.upper()
@@ -285,11 +293,50 @@ def main():
         print("templates: " + "; ".join(f"{n} x{t['count']} soft {t['soft_attack']:.0f} -> "
                                          f"{planner.quality(type('D', (), {'template': n})()):.2f}"
                                          for n, t in sorted(st.items(), key=lambda x: -x[1]['count'])))
+    defender = None
+    if a.defend:
+        defender = defend.Defender(m, defence.Defence(m, defence.Rules(), me, *defence.buildings(m)), me)
+    widths = {"ours": defence.DIVISION_WIDTH, "foes": defence.DIVISION_WIDTH}
+
+    def attack_tags(enemy_tags):
+        """Who attacks us: the target and its friends that border us, and anyone at war with us."""
+        ctrl = provinces.controller
+        border = {int(ctrl[q]) for p in m.provinces if m.is_land(p) and ctrl[p] == me for q in m.land_neighbours(p)}
+        near = {t for t in [target] + friends_of(target) if t in ids and (t == target or ids[t] in border)}
+        return sorted(near | set(enemy_tags))
+
+    def load_forces(divs, foe_tags):
+        """--defend: both armies' stats per width (the combat model) and our templates' speeds (the reserve)."""
+        from hoi4ai.memory import Process
+        proc = Process()
+
+        def army(tags_):
+            rows = {}
+            for tg in tags_:
+                for name, t in templates.country(tg, [x for x in divs if x.owner == tg], proc).items():
+                    rows[(tg, name)] = t
+            n = sum(t["count"] for t in rows.values())
+            w = sum(t["combat_width"] * t["count"] for t in rows.values())
+            if not n or not w:
+                return defence.DIVISION_WIDTH, None, {}
+            per = {k: sum(t[k] * t["count"] for t in rows.values()) / w for k in ("soft_attack", "defense", "breakthrough")}
+            return w / n, per, {name: t["maximum_speed"] for (_, name), t in rows.items()}
+        try:
+            widths["ours"], ours, speeds = army([tag])
+            widths["foes"], theirs, _ = army(foe_tags)
+        except Exception as e:  # without: every division 18 wide, division for division
+            print("template stats:", e)
+            return
+        defender.d.set_forces(ours, theirs)
+        defender.speeds = speeds
+        print(f"forces per width: {tag} " + ", ".join(f"{k} {v:.1f}" for k, v in (ours or {}).items())
+              + f"; {' '.join(foe_tags)} " + ", ".join(f"{k} {v:.1f}" for k, v in (theirs or {}).items()))
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     log = Log(os.path.join(REPO, "recordings", f"controller_{tag}_{stamp}"))
     rec = None
     if not a.dry_run and not a.no_record:  # the war as tools/compare_runs.py reads it, and every command
-        rec = BattleRecorder(log.folder, "ours", tag, target, tags)
+        # a defence is recorded from the attacker's side: like any recording of TARGET attacking TAG
+        rec = BattleRecorder(log.folder, "ours", *((target, tag) if a.defend else (tag, target)), tags)
         print(send("bridge.cmdrec on " + os.path.join(log.folder, "command_record.tsv"))[0])
     if not a.no_takeover and not a.dry_run:
         takeover.take(tag, armies=a.armies)
@@ -430,7 +477,12 @@ def main():
                 last = None
                 time.sleep(1)
                 continue
-            if now.date() != stats_day and (stats_day is None or any(
+            if a.defend:
+                if now.date() != stats_day and (stats_day is None or any(
+                        d.owner == tag and d.template not in defender.speeds for d in divs)):
+                    stats_day = now.date()
+                    load_forces(divs, attack_tags(enemies_of(tag)))
+            elif now.date() != stats_day and (stats_day is None or any(
                     d.owner == tag and d.template not in planner.stats for d in divs)):
                 stats_day = now.date()
                 load_stats(divs)
@@ -477,9 +529,21 @@ def main():
             # with --execute, divisions of armies on a battle plan are the game's to move
             # each army with a front line holds its own stretch (where its plan is)
             zone = plans.zones(m, zone_specs, provinces.controller, {me, *friend_ids}) if zone_specs else None
-            orders, rep = planner.plan(provinces.controller,
-                                       [d for d in divs if not (a.execute and d.owner == tag and d.army in planned)],
-                                       tag, enemy_ids, tgt, at_war, friend_ids, zones=zone)
+            if a.defend:
+                foe_tags = attack_tags(enemy_tags)
+                at_war = bool(set(foe_tags) & set(enemy_tags))
+                if at_war and war_start is None:
+                    war_start = now
+                orders, rep = defender.plan(provinces.controller, provinces.owner, divs, tag,
+                                            {ids[t] for t in foe_tags}, at_war,
+                                            [d for d in divs if d.owner in foe_tags], widths["ours"], widths["foes"],
+                                            hour=(now - datetime.datetime(1900, 1, 1)).total_seconds() / 3600)
+                stops = defender.stops
+            else:
+                orders, rep = planner.plan(provinces.controller,
+                                           [d for d in divs if not (a.execute and d.owner == tag and d.army in planned)],
+                                           tag, enemy_ids, tgt, at_war, friend_ids, zones=zone)
+                stops = planner.stops
             mine = {d.id: d for d in divs if d.owner == tag}
             if membership and not a.dry_run:  # divisions that drifted out of their army go back
                 strays = collections.defaultdict(list)
@@ -533,7 +597,7 @@ def main():
                     kind = "rail"  # a long way in peacetime: by train (strategic redeployment)
                 cmds.append(f"bridge.rail {did} {prov}" if kind == "rail" else f"bridge.move {did} {prov}")
                 batch.append((d, prov, kind))
-            for d in planner.stops:  # attacks to call off
+            for d in stops:  # attacks to call off
                 cmds.append(f"bridge.stop {d.id}" if can_stop else f"bridge.move {d.id} {d.province}")
                 batch.append((d, d.province, "stop"))
             if cmds and not a.dry_run:
@@ -548,18 +612,30 @@ def main():
                         failed += not ok
                         log.move(now, d, prov, kind, "ok" if ok else r)
             ctrl = provinces.controller
-            target_land = [p for p in m.provinces if m.is_land(p) and provinces.owner[p] == tgt]
-            taken = sum(1 for p in target_land if ctrl[p] == me)
-            capitulated = at_war and trigger(f"{target} = {{ has_capitulated = yes }}")
+            if a.defend:  # our land, and how much of it the enemy holds
+                target_land = [p for p in m.provinces if m.is_land(p) and provinces.owner[p] == me]
+                taken = sum(1 for p in target_land if ctrl[p] != me)
+                capitulated = at_war and trigger(f"{tag} = {{ has_capitulated = yes }}")
+            else:
+                target_land = [p for p in m.provinces if m.is_land(p) and provinces.owner[p] == tgt]
+                taken = sum(1 for p in target_land if ctrl[p] == me)
+                capitulated = at_war and trigger(f"{target} = {{ has_capitulated = yes }}")
             row = dict(date=now.strftime("%Y-%m-%d %H:00"), at_war=int(at_war), enemies=" ".join(enemy_tags),
                        **rep, orders=len(orders), moves=sent, failed=failed,
                        target_provinces=len(target_land), taken=taken, capitulated=int(capitulated),
                        ms=int((time.time() - t0) * 1000))
             log.tick(row)
             if rec:
-                rec.step(now, divs, ctrl, enemy_tags, at_war, capitulated)
+                rec.step(now, divs, ctrl, enemies_of(target) if a.defend else enemy_tags, at_war, capitulated)
                 send(f"bridge.cmdrec mark date={row['date']}")
-            print(f"{row['date']} war={row['at_war']} divs={rep['divisions']} front={rep['front']} "
+            if a.defend:
+                print(f"{row['date']} war={row['at_war']} divs={rep['divisions']} line={rep['front']} provinces "
+                      f"({rep.get('line_vp', 0):.0%} VP, need {rep.get('line_need', 0)}) held={rep.get('held', 0)} "
+                      f"reserve={rep.get('reserve', 0)} lost_behind={rep.get('lost_behind', 0)} "
+                      f"counters={rep.get('counters', 0)} blocks={rep.get('blocks', 0)} lines={rep.get('lines', 0)} "
+                      f"moves={sent} fail={failed} lost={taken}/{len(target_land)} ({row['ms']} ms)")
+            else:
+              print(f"{row['date']} war={row['at_war']} divs={rep['divisions']} front={rep['front']} "
                   f"fast={rep['fast']} attacks={rep.get('fast_attacks', 0)}+{rep.get('attacks', 0)} drives={rep.get('drives', 0)}+{rep.get('infantry_drives', 0)} resting={rep.get('resting', 0)} moves={sent} fail={failed} "
                   f"taken={taken}/{len(target_land)} short_of_supply={rep['short_of_supply']} ({row['ms']} ms)")
             if a.once:
@@ -569,7 +645,7 @@ def main():
                 break
             if capitulated:
                 days = (now - war_start).total_seconds() / 86400 if war_start else 0
-                print(f"{target} capitulated on {row['date']}, {days:.1f} days after the war began")
+                print(f"{tag if a.defend else target} capitulated on {row['date']}, {days:.1f} days after the war began")
                 break
     except KeyboardInterrupt:
         print("stopped")
