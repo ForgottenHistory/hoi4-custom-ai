@@ -22,6 +22,7 @@ import time
 import _bridge  # noqa: F401
 from hoi4bridge import BridgeError, BridgeUnavailable, query, send, trigger
 from hoi4ai import leaders as leaders_mod, mapdata, organize, plans, units
+from hoi4ai.battlerec import BattleRecorder
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.front import Planner
 from hoi4ai.live import Provinces
@@ -250,6 +251,7 @@ def main():
     ap.add_argument("--armies", action="store_true",
                     help="let the game form armies and pick generals (their buffs); fronts and plans stay blocked")
     ap.add_argument("--no-takeover", action="store_true", help="don't block the game AI's army commands")
+    ap.add_argument("--no-record", action="store_true", help="don't record the war (hoi4ai/battlerec.py)")
     a = ap.parse_args()
     if not a.dry_run:
         _lock()
@@ -267,6 +269,10 @@ def main():
     planner = Planner(m, me, fast_units, armored_units={n for n, u in unit_types.items() if u.armored})
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     log = Log(os.path.join(REPO, "recordings", f"controller_{tag}_{stamp}"))
+    rec = None
+    if not a.dry_run and not a.no_record:  # the war as tools/compare_runs.py reads it, and every command
+        rec = BattleRecorder(log.folder, "ours", tag, target, tags)
+        print(send("bridge.cmdrec on " + os.path.join(log.folder, "command_record.tsv"))[0])
     if not a.no_takeover and not a.dry_run:
         takeover.take(tag, armies=a.armies)
         print("took over", tag, "from the game AI" + (" (armies and generals left to the game)" if a.armies else ""))
@@ -528,6 +534,9 @@ def main():
                        target_provinces=len(target_land), taken=taken, capitulated=int(capitulated),
                        ms=int((time.time() - t0) * 1000))
             log.tick(row)
+            if rec:
+                rec.step(now, divs, ctrl, enemy_tags, at_war, capitulated)
+                send(f"bridge.cmdrec mark date={row['date']}")
             print(f"{row['date']} war={row['at_war']} divs={rep['divisions']} front={rep['front']} "
                   f"fast={rep['fast']} attacks={rep.get('fast_attacks', 0)}+{rep.get('attacks', 0)} drives={rep.get('drives', 0)} resting={rep.get('resting', 0)} moves={sent} fail={failed} "
                   f"taken={taken}/{len(target_land)} short_of_supply={rep['short_of_supply']} ({row['ms']} ms)")
@@ -542,6 +551,9 @@ def main():
                 break
     except KeyboardInterrupt:
         print("stopped")
+    finally:
+        if rec:
+            print(send("bridge.cmdrec off")[0])
 
 
 if __name__ == "__main__":
