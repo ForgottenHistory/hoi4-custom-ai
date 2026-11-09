@@ -47,7 +47,8 @@ and live data from the running game's memory.
   base game's (and earlier mods') files in that folder. The game folder is taken from the running `hoi4.exe`.
 - `mapdata.py`: provinces (land/sea/lake, terrain, continent, centre), neighbours (pixels touching in the
   `provinces.bmp` named by `default.map`, plus `adjacencies.csv` crossings, minus its `impassable` borders), shared
-  border length, and states (provinces, victory points) from `history/states`. Built in ~1 s, cached in `.cache/`.
+  border length, river borders (`rivers.bmp`: a border with a river along at least a quarter of it; large
+  from width index 7), and states (provinces, victory points) from `history/states`. Built in ~1 s, cached in `.cache/`.
 - `memory.py`: reads the game's memory (read-only) and names objects by their RTTI class. It starts from the
   game state (`CCurrentGameState`), using the static the exe keeps only when RTTI confirms it, else by class
   name.
@@ -59,8 +60,10 @@ and live data from the running game's memory.
   enemy, gathers its reserves at a few support points, and attacks locally where clearly stronger. The fast
   divisions form one breakthrough army: before the war it deploys at the start of the best route to the
   enemy's top victory point, at war it attacks along that route and keeps pushing on the cheapest way. A
-  route's cost counts terrain (plains 1, urban 1.5, forest and hills 2, marsh and jungle 3, mountains 4) and
-  defenders. Each connected piece of the territory our front runs along (our own, our subjects' and faction
+  route's cost counts terrain (plains 1, urban 1.5, forest and hills 2, marsh and jungle 3, mountains 4),
+  defenders, and rivers crossed (+1 small, +2 large; attacks across them want 25% / 50% more strength).
+  Infantry support points only go on routes at most 1.2x the best; otherwise the infantry stands behind the
+  fast army. Each connected piece of the territory our front runs along (our own, our subjects' and faction
   members') is planned on its own.
 - `live.py`: every province's controller, owner and state in one pass (~35 ms).
 

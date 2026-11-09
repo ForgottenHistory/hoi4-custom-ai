@@ -18,6 +18,8 @@ import math
 # cost of moving and fighting through a province, by terrain (plains = 1)
 TERRAIN_COST = {"plains": 1.0, "desert": 1.0, "urban": 1.5, "forest": 2.0, "hills": 2.0, "jungle": 3.0,
                 "marsh": 3.0, "mountain": 4.0}
+RIVER_COST = {0: 0.0, 1: 1.0, 2: 2.0}        # added to a route for crossing a small / large river
+RIVER_ATTACK = {0: 1.0, 1: 1.25, 2: 1.5}     # extra strength wanted to attack across one
 FULL_DIVISION = 80.0  # power (organisation x strength) of a fresh 1939 infantry division
 
 
@@ -34,6 +36,7 @@ class Settings:
     retreat_org = 0.20         # attackers below this share are pulled back
     support_every = 10         # one infantry support point per this many reserve infantry divisions
     max_support = 4
+    support_route = 1.2        # support points only on routes at most this much dearer than the best
     sector_size = 3            # front provinces a force spreads over (its point and best neighbours)
     keep = 8                   # planning steps a chosen point is kept while it stays on the front
 
@@ -78,7 +81,7 @@ class Planner:
 
     def routes(self, goal, allowed, foe_power):
         """Cost from each province in ALLOWED to GOAL (Dijkstra), counting each province's terrain and defenders
-        on the way, the province itself included."""
+        on the way (the province itself included) and the rivers crossed."""
         def step(p):
             return self.terrain(p) * (1.0 + foe_power.get(p, 0.0) / FULL_DIVISION)
         dist = {goal: step(goal)}
@@ -89,7 +92,7 @@ class Planner:
                 continue
             for n in self.nb(p):
                 if n in allowed:
-                    nc = c + step(n)
+                    nc = c + step(n) + RIVER_COST[self.m.river(n, p)]
                     if nc < dist.get(n, math.inf):
                         dist[n] = nc
                         heapq.heappush(heap, (nc, n))
@@ -132,7 +135,8 @@ class Planner:
 
         def route_from(p):
             """Best route cost to the goal starting with an attack out of our province P."""
-            return min((route[t] for t in facing.get(p, ()) if t in route), default=math.inf)
+            return min((route[t] + RIVER_COST[m.river(p, t)] for t in facing.get(p, ()) if t in route),
+                       default=math.inf)
 
         # --- territory pieces connected by land (mainland, exclaves) are planned separately ------------------
         comp = {}
@@ -189,7 +193,10 @@ class Planner:
             for b in spts:
                 used.update(self.sector(b, score))
             want = min(s.max_support, reserves // s.support_every)
+            best_route = min(score.values())
             for p in sorted(score, key=score.get):
+                if score[p] > best_route * s.support_route:
+                    break
                 if len(spts) >= want:
                     break
                 sec = self.sector(p, score)
@@ -198,11 +205,13 @@ class Planner:
                 self.points[p] = ("support", s.keep)
                 spts.append(p)
                 used.update(sec)
+            if reserves and not spts:  # no good route left for support: stand behind the fast army
+                spts = list(fpts)
             if spts and reserves:
                 per = math.ceil(reserves / len(spts))
                 for b in spts:
                     sec = self.sector(b, score)
-                    sectors[b] = ("support", sec)
+                    sectors.setdefault(b, ("support", sec))
                     for i, q in enumerate(sec):
                         line_demand[q] = line_demand.get(q, 0) + per // len(sec) + (1 if i < per % len(sec) else 0)
 
@@ -221,7 +230,6 @@ class Planner:
 
             def attack(targets, eligible, margin, min_org, keep_home, label):
                 for t in targets:
-                    need = foe_power[t] * self.terrain(t) * margin
                     pool = []
                     for p in self.nb(t):
                         staying = [d for d in here.get(p, ()) if d.id not in attacking]
@@ -230,6 +238,9 @@ class Planner:
                         exposed = keep_home and any(foe_power[q] > 0 for q in facing.get(p, ()) if q != t)
                         pool += ready[:max(0, len(staying) - 1)] if exposed else ready
                     pool.sort(key=power, reverse=True)
+                    # attacked across the worst river among the provinces we attack from
+                    rv = max((m.river(d.province, t) for d in pool), default=0)
+                    need = foe_power[t] * self.terrain(t) * margin * RIVER_ATTACK[rv]
                     chosen, total = [], 0.0
                     for d in pool:
                         if total > need and chosen:

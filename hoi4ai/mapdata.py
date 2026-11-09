@@ -16,7 +16,7 @@ import numpy as np
 from .gamefiles import GameFiles
 
 CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cache")
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 
 
 class Province:
@@ -42,15 +42,20 @@ class State:
 
 class Map:
     """provinces {id: Province}; neighbours {id: {id: Edge kind}}; border {(a, b): shared pixel edges, a < b};
-    states {id: State}."""
+    rivers {(a, b): 1 small river | 2 large river along that border, a < b}; states {id: State}."""
 
     def __init__(self):
         self.provinces, self.neighbours, self.border, self.states = {}, {}, {}, {}
+        self.rivers = {}
         self.width = self.height = 0
         self.sources = {}
 
     def land_neighbours(self, pid):
         return [n for n in self.neighbours.get(pid, ()) if self.provinces[n].kind == "land"]
+
+    def river(self, a, b):
+        """0 none, 1 small river, 2 large river between provinces A and B."""
+        return self.rivers.get((a, b) if a < b else (b, a), 0)
 
     def is_land(self, pid):
         p = self.provinces.get(pid)
@@ -62,13 +67,60 @@ def _strip_comments(text):
 
 
 def _read_default_map(files):
-    names = {"definitions": "definition.csv", "provinces": "provinces.bmp", "adjacencies": "adjacencies.csv"}
+    names = {"definitions": "definition.csv", "provinces": "provinces.bmp", "adjacencies": "adjacencies.csv",
+             "rivers": "rivers.bmp"}
     p = files.find("map/default.map")
     if p:
         for k, v in re.findall(r'(?m)^\s*(\w+)\s*=\s*"([^"]+)"', _strip_comments(open(p, encoding="latin-1").read())):
             if k in names:
                 names[k] = v
     return {k: files.find("map/" + v) for k, v in names.items()}
+
+
+def _read_bmp_indexed(path):
+    """8-bit palette BMP -> (H, W) uint8 array of palette indices, top row first."""
+    data = open(path, "rb").read()
+    off, = struct.unpack_from("<I", data, 10)
+    w, h = struct.unpack_from("<ii", data, 18)
+    bpp, comp = struct.unpack_from("<HI", data, 28)
+    if bpp != 8 or comp != 0:
+        raise ValueError("%s: need an 8-bit uncompressed BMP" % path)
+    top_down = h < 0
+    h = abs(h)
+    stride = (w + 3) & ~3
+    rows = np.frombuffer(data, np.uint8, stride * h, off).reshape(h, stride)[:, :w]
+    return rows if top_down else rows[::-1]
+
+
+# rivers.bmp palette: 0-2 markers (source, merge, split), 3-11 river width (thin to wide), 254/255 none
+RIVER_LARGE_FROM = 7
+RIVER_SHARE = 0.25  # share of a border's length that must run along a river for it to be a river crossing
+
+
+def _river_borders(ids, rivers):
+    """{(a, b): 1 small / 2 large} for borders that run along a river."""
+    river = (rivers >= 3) & (rivers <= 11)
+    large = (rivers >= RIVER_LARGE_FROM) & (rivers <= 11)
+    total, on_river, on_large = {}, {}, {}
+    for (a, b, ra, rb, la, lb) in (
+            (ids[:, :-1], ids[:, 1:], river[:, :-1], river[:, 1:], large[:, :-1], large[:, 1:]),
+            (ids[:-1, :], ids[1:, :], river[:-1, :], river[1:, :], large[:-1, :], large[1:, :])):
+        m = a != b
+        lo = np.minimum(a[m], b[m]).astype(np.int64)
+        hi = np.maximum(a[m], b[m]).astype(np.int64)
+        key = lo * 1000000 + hi
+        r = (ra[m] | rb[m])
+        l_ = (la[m] | lb[m])
+        for arr, out in ((np.ones_like(r), total), (r, on_river), (l_, on_large)):
+            uk, cnt = np.unique(key[arr.astype(bool)], return_counts=True)
+            for k, c in zip(uk.tolist(), cnt.tolist()):
+                out[k] = out.get(k, 0) + c
+    res = {}
+    for k, n in total.items():
+        rv = on_river.get(k, 0)
+        if n and rv / n >= RIVER_SHARE:
+            res[(k // 1000000, k % 1000000)] = 2 if on_large.get(k, 0) * 2 >= rv else 1
+    return res
 
 
 def _read_bmp(path):
@@ -228,6 +280,14 @@ def load(files=None, use_cache=True, verbose=False):
         m.neighbours.setdefault(a, {})[b] = kind
         m.neighbours.setdefault(b, {})[a] = kind
 
+    if src.get("rivers"):
+        try:
+            rv = _read_bmp_indexed(src["rivers"])
+            if rv.shape == ids.shape:
+                m.rivers = {k: v for k, v in _river_borders(ids, rv).items() if k[0] and k[1]}
+        except ValueError as e:
+            if verbose:
+                print("rivers:", e)
     for (a, b), c in _pixel_graph(ids).items():
         if a and b and a in m.provinces and b in m.provinces:
             m.border[(a, b)] = c
