@@ -251,17 +251,17 @@ def main():
         provinces.refresh()
         infantry = group_armies[1:]  # the first army of the group is the fast army
         divs0 = snap.take()
-        border = plans.fronts(Process(), me, tgt, provinces.controller, m)
+        secs = plans.sections(Process(), me, tgt, provinces.controller)
         vps = {p: v for st in m.states.values() for p, v in st.victory_points.items()
                if provinces.controller[p] == tgt}
-        if border and vps:
+        if secs and vps:
             armies = {aid: [d for d in divs0 if d.owner == tag and d.army == aid] for aid in infantry}
-            for line in plans.draw(plans.make(m, armies, border, vps)):
+            for aid, ok, line in plans.draw(plans.make(m, armies, secs, vps, provinces.controller, tgt)):
                 print(line)
-                if "front" in line and "OK front line" in line:
-                    planned.add(int(line.split()[1].rstrip(":")))
+                if ok:
+                    planned.add(aid)
         else:
-            print("battle plans: no border with", target, "found" if not border else "", "or no victory points")
+            print("battle plans: no border with", target, "found" if not secs else "", "or no victory points")
     ticks = 0
     can_stop = send("bridge.stop")[0].startswith("FAIL usage: bridge.stop")
     print("stopping attacks with", "bridge.stop" if can_stop else "a move back to the division's own province")
