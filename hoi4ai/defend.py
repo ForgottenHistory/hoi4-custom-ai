@@ -4,6 +4,9 @@
   for the divisions we have; behind rivers and in rough ground where it can). Land in front of it is given up.
 - Divisions go along the line by what each province needs: more where the attack is easy (open ground, no river,
   a wide battle), fewer behind a river or in mountains. Divisions already holding stay where they are.
+- Where the enemy masses, more go: a province's need counts the enemy divisions that can attack it next (smoothed
+  over a few steps), not only an even share of the attacker's army.
+- A city on the line whose loss would make us capitulate (or leave no buffer) gets a full stack.
 - A reserve (the fastest divisions) waits behind the line, near the sectors that need the most, to plug breaches:
   a province behind the line taken by a weak enemy is attacked back; against a strong one the reserve blocks
   around it.
@@ -24,6 +27,8 @@ class Settings:
     broken_share = 0.25     # the line is broken when this share of its provinces is the enemy's
     counter_margin = 1.5    # reserves attack a lost province when their power is this many times the enemy's there
     replan_hours = 24       # at most one new line this often (unless forced)
+    threat_memory = 0.6     # share of the last threat kept each step (the rest is what is there now)
+    threat_floor = 0.5      # a province counts at least this share of an even spread of the attacker's army
 
 
 class Defender:
@@ -35,6 +40,7 @@ class Defender:
         self.line = self.fallback = None
         self.lines_seen = 0
         self._planned_at = -math.inf
+        self.threat = {}  # line province -> enemy divisions that can attack it (smoothed)
         self.stops = []
         self.view = {}
 
@@ -89,8 +95,24 @@ class Defender:
         keep = line.keep & own
         front = [p for p in line.front if ctrl[p] == self.me] or sorted(keep)[:1]
         per = n_foes / max(1, len(front))
-        need = {p: self.d.need(p, line.approaches.get(p) or [q for q in self.nb(p) if q not in keep] or [p],
-                               div_width, per, foe_width) for p in front}
+        src = {p: line.approaches.get(p) or [q for q in self.nb(p) if q not in keep] or [p] for p in front}
+        # the enemy that can attack each line province next: in its approaches or one step beyond, shared among the
+        # line provinces it could go for
+        foe_at = collections.Counter(x.province for x in foes if m.is_land(x.province) and x.province not in keep)
+        reach = collections.defaultdict(set)
+        for p in front:
+            for q in src[p]:
+                for f in [q] + self.nb(q):
+                    if f in foe_at:
+                        reach[f].add(p)
+        now = collections.Counter()
+        for f, ps in reach.items():
+            for p in ps:
+                now[p] += foe_at[f] / len(ps)
+        mem = s.threat_memory if self.threat and not replanned else 0.0
+        self.threat = {p: mem * self.threat.get(p, now[p]) + (1 - mem) * now[p] for p in front}
+        need = {p: self.d.need(p, src[p], div_width, max(self.threat[p], s.threat_floor * per), foe_width)
+                for p in front}
 
         # who is where: a division counts where it is going (keeps orders from flapping)
         at = {d.id: (d.dest if d.moving and d.dest else d.province) for d in mine}
@@ -98,10 +120,18 @@ class Defender:
         n_res = int(round(len(mine) * s.reserve_share))
         reserve_ids = {d.id for d in by_speed[:n_res]}
 
-        # line slots: by need, at least one each, at most max_stack (largest remainder)
+        # line slots: a city whose loss leaves no buffer gets a full stack; the rest by need, at least one each, at
+        # most max_stack (largest remainder)
+        floor = 1 - self.d.r.surrender_limit
+        held = sum(v for p, v in self._vps.items() if ctrl[p] == self.me) / self._total_vp
+        critical = {p for p in front if self._vps.get(p, 0)
+                    and held - self._vps[p] / self._total_vp < floor + self.d.s.buffer}
         n_line = len(mine) - n_res
-        total = sum(need.values()) or 1.0
-        raw = {p: n_line * need[p] / total for p in front}
+        rest = [p for p in front if p not in critical]
+        n_rest = max(len(rest), n_line - s.max_stack * len(critical))
+        total = sum(need[p] for p in rest) or 1.0
+        raw = {p: n_rest * need[p] / total for p in rest}
+        raw.update({p: float(s.max_stack) for p in critical})
         alloc = {p: max(1, min(s.max_stack, int(raw[p]))) for p in front}
         spare = n_line - sum(alloc.values())
         for p in sorted(front, key=lambda p: -(raw[p] - int(raw[p]))):
@@ -200,8 +230,10 @@ class Defender:
                 orders[d.id] = min(front, key=lambda p: dist(d, p))
             used.add(d.id)
 
-        self.view = dict(line=line, front=front, need=need, alloc=alloc, points=points, lost=lost)
-        rep = dict(divisions=len(mine), front=len(front), line_vp=round(line.vp, 3),
+        self.view = dict(line=line, front=front, need=need, alloc=alloc, points=points, lost=lost,
+                         threat=dict(self.threat), critical=critical)
+        rep = dict(divisions=len(mine), front=len(front), line_vp=round(line.vp, 3), held_vp=round(held, 3),
+                   critical=len(critical), threat=round(sum(now.values())),
                    line_need=round(sum(need.values())), reserve=n_res, reserve_points=len(points),
                    lost_behind=len(lost), counters=counters, blocks=blocks, replanned=int(replanned),
                    lines=self.lines_seen, unfilled=sum(slots.values()),

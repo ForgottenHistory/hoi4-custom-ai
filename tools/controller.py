@@ -630,7 +630,8 @@ def main():
                 send(f"bridge.cmdrec mark date={row['date']}")
             if a.defend:
                 print(f"{row['date']} war={row['at_war']} divs={rep['divisions']} line={rep['front']} provinces "
-                      f"({rep.get('line_vp', 0):.0%} VP, need {rep.get('line_need', 0)}) held={rep.get('held', 0)} "
+                      f"({rep.get('line_vp', 0):.0%} VP, need {rep.get('line_need', 0)}) VP held={rep.get('held_vp', 0):.0%} "
+                      f"critical={rep.get('critical', 0)} threat={rep.get('threat', 0)} held={rep.get('held', 0)} "
                       f"reserve={rep.get('reserve', 0)} lost_behind={rep.get('lost_behind', 0)} "
                       f"counters={rep.get('counters', 0)} blocks={rep.get('blocks', 0)} lines={rep.get('lines', 0)} "
                       f"moves={sent} fail={failed} lost={taken}/{len(target_land)} ({row['ms']} ms)")

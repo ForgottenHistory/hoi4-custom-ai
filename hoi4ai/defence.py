@@ -119,6 +119,7 @@ class Line:
         self.t, self.keep, self.front = t, keep, front
         self.vp, self.factories, self.need = vp, factories, need
         self.approaches = approaches  # {front province: [provinces the attacker comes from]}
+        self.front_vp = 0.0  # share of the victory points in its most valuable front province
 
 
 class Defence:
@@ -258,7 +259,10 @@ class Defence:
                 fk = sum(fac(p) for p in keep) / total_fac
                 per = None if foes is None else foes / len(approaches)  # the attacker spread along the line
                 need = sum(self.need(p, src, div_width, per, foe_width) for p, src in approaches.items())
-                out.append(Line(depth, set(keep), frozenset(approaches), vp, fk, need, approaches))
+                line = Line(depth, set(keep), frozenset(approaches), vp, fk, need, approaches)
+                # the line's worst loss: its most valuable front province (a city on the line can fall)
+                line.front_vp = max((vps.get(p, 0) for p in approaches if owner[p] == self.me), default=0) / total_vp
+                out.append(line)
         # only lines nothing beats on all three: victory points, factories, divisions needed
         out = [l for l in out if not any(o.vp >= l.vp and o.factories >= l.factories and o.need <= l.need
                                          and (o.vp, o.factories, o.need) != (l.vp, l.factories, l.need) for o in out)]
@@ -288,8 +292,12 @@ class Defence:
         DIVISIONS can hold with the buffer kept; if none can be held, the one we come closest to holding among
         those keeping the buffer. The fallback is the next line inward that keeps the surrender limit and needs
         the fewest divisions."""
+        if not lines:
+            return None, None
         floor = 1 - self.r.surrender_limit
-        safe = [l for l in lines if l.vp >= floor + self.s.buffer] or [l for l in lines if l.vp > floor] or lines
+        # a line keeps the buffer even after losing its most valuable front province; failing that, it survives it
+        safe = [l for l in lines if l.vp - l.front_vp >= floor + self.s.buffer] or \
+            [l for l in lines if l.vp - l.front_vp > floor] or [l for l in lines if l.vp > floor] or lines
         held = [l for l in safe if l.need <= divisions]
         main = max(held, key=lambda l: (l.vp, l.factories)) if held else min(safe, key=lambda l: l.need)
         inner = [l for l in lines if l.keep < main.keep and l.vp > floor and l.need < main.need]
