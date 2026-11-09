@@ -4,28 +4,29 @@ import time
 
 from hoi4bridge import send
 
-# CArmy (handle 51) fields: owner, province, destination (0 = none), current organisation, strength, template name,
+# CArmy (handle 51) fields: owner, province, destination (0 = none), current organisation (+0x68; +0x20 is the
+# maximum: read as current until 2026-11-10, so worn-out divisions looked fresh), strength, template name,
 # main sub-unit sprite (the map counter's: +0x128 -> a CSubUnitDefinition whose key at +0x18 is "---"; its
 # sprite at +0x68 is "infantry" for mountaineers, "light_armor" / "motorized" for those, so it tells fast from
 # slow; the template's battalions are in hoi4ai/templates.py), and +0x490,
 # probably its supply level (100000 = fully supplied; 72727 in a starving 23-division stack, 100000 elsewhere),
 # and the id of the army (or front) it is in, 0 if none (+0xb0 -> its COrdersGroup, id at +0xc), and the path it
 # is moving along ({int province ids} vector at +0x1f0, count +0x1fc: the next province first; battle plans move
-# divisions along it without setting the destination at +0x2a4): its length and next province.
-# Fixed point x1000; strength 100000 = 100%.
-FIELDS = "c1c8 i1e0.a4 i2a4 i20 i30 s3a8.20 s128.68 i490 ib0.c i1fc i1f0.0"
+# divisions along it without setting the destination at +0x2a4): its length and next province; last the maximum
+# organisation (+0x20). Fixed point x1000; strength 100000 = 100%.
+FIELDS = "c1c8 i1e0.a4 i2a4 i68 i30 s3a8.20 s128.68 i490 ib0.c i1fc i1f0.0 i20"
 
 
 class Division:
     __slots__ = ("id", "owner", "province", "dest", "org", "strength", "template", "unit", "supply", "army", "path",
-                 "next")
+                 "next", "max_org")
 
     def __init__(self, did, owner, province, dest, org, strength, template, unit="", supply=100000, army=0, path=0,
-                 nxt=0):
+                 nxt=0, max_org=0):
         self.id, self.owner, self.province, self.dest = did, owner, province, dest
         self.org, self.strength, self.template, self.unit, self.supply = org, strength, template, unit, supply
         self.army = army
-        self.path, self.next = path, nxt if path else 0  # the next province, 0 when not moving
+        self.max_org = max_org  # 0: not known        self.path, self.next = path, nxt if path else 0  # the next province, 0 when not moving
 
     @property
     def moving(self):
@@ -69,7 +70,8 @@ class Snapshotter:
                     out[int(p[0])] = Division(int(p[0]), p[1], int(p[2]), int(p[3]), int(p[4]), int(p[5]), p[6],
                                               p[7] if len(p) > 7 else "", int(p[8]) if len(p) > 8 else 100000,
                                               int(p[9]) if len(p) > 9 and p[9].lstrip("-").isdigit() else 0,
-                                              int(p[10]) if len(p) > 11 else 0, int(p[11]) if len(p) > 11 else 0)
+                                              int(p[10]) if len(p) > 11 else 0, int(p[11]) if len(p) > 11 else 0,
+                                              int(p[12]) if len(p) > 12 else 0)
                 except ValueError:
                     continue
         # strength 0 and org 0: at sea or deploying, not on the map

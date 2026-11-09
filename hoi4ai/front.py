@@ -191,8 +191,10 @@ class Planner:
         return getattr(d, "unit", None) in self.fast_units
 
     def org_share(self, d):
-        """Organisation as a share of the best seen, for the division or any division of its template (so a
-        division first seen worn out doesn't count as fresh)."""
+        """Organisation as a share of its maximum when known; else of the best seen, for the division or any
+        division of its template (so a division first seen worn out doesn't count as fresh)."""
+        if getattr(d, "max_org", 0) > 0:
+            return min(1.0, d.org / d.max_org)
         self.best_org[d.id] = max(self.best_org.get(d.id, 0), d.org)
         self.template_org[d.template] = max(self.template_org.get(d.template, 0), d.org)
         best = max(self.best_org[d.id], self.template_org[d.template])
