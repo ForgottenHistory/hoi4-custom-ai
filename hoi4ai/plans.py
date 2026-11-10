@@ -11,11 +11,14 @@ a player's front line at Köslin was 80-100%, the end of the mainland section).
 """
 import collections
 import math
+import os
 import re
+import time
 
 from hoi4bridge import send
 
 FULL = 100000
+CACHE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cache")
 
 
 def _addr(type_, oid):
@@ -46,16 +49,45 @@ def _provinces(proc, vec):
     return out
 
 
-def sections(proc, me, target, ctrl, max_misses=40):
+def front_ids():
+    """Ids of every CFront the game holds (one bridge.snap: ids grow over a game with wide gaps, so stepping
+    through them stopped long before the later fronts)."""
+    path = os.path.join(CACHE, "fronts_snap.tsv")
+    os.makedirs(CACHE, exist_ok=True)
+    send("bridge.snap reset " + path)
+    send("bridge.snap now 66 class=CFront i64")
+    for attempt in range(20):  # the game may still hold the file for a moment
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+            break
+        except PermissionError:
+            time.sleep(0.05)
+    else:
+        raise PermissionError(path)
+    out = []
+    for line in text.splitlines():
+        p = line.split("	")
+        if not line.startswith("#") and p[0].isdigit():
+            out.append(int(p[0]))
+    return sorted(set(out))
+
+
+def _addresses(type_, ids, chunk=100):
+    out = {}
+    for k in range(0, len(ids), chunk):
+        part = ids[k:k + chunk]
+        for oid, r in zip(part, send(*[f"bridge.object {type_} {i}" for i in part])):
+            m = re.search(r"@0x([0-9a-fA-F]+)", r)
+            if m:
+                out[oid] = int(m.group(1), 16)
+    return out
+
+
+def sections(proc, me, target, ctrl):
     """The sections of the CFronts between our land and the target's (the far side mostly the target's)."""
-    out, seen, misses, i = [], set(), 0, 0
-    while misses < max_misses:
-        i += 1
-        a = _addr(66, i)
-        if not a:
-            misses += 1
-            continue
-        misses = 0
+    out, seen = [], set()
+    for i, a in sorted(_addresses(66, front_ids()).items()):
         try:
             data = int.from_bytes(proc.read(a + 0x58, 8), "little")
             n = int.from_bytes(proc.read(a + 0x64, 4), "little")
