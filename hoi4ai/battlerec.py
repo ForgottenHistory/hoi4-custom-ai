@@ -10,6 +10,8 @@ A recording is a folder:
                  fields: their strength column is meaningless, supply was the organisation share and share the
                  strength (tools/compare_runs.py reads both)
   control.tsv    who controls each province: every province at the first step, then only the changes
+  casualties.tsv per step at war: our losses and the target's in our war with it, as the war summary counts them
+                 (hoi4ai.wars; manpower, cumulative)
 Steps are in-game times; the caller decides how often (tools/battlerec.py: every few in-game hours).
 """
 import datetime
@@ -17,6 +19,8 @@ import json
 import os
 
 import numpy as np
+
+from hoi4ai import wars
 
 
 class BattleRecorder:
@@ -33,8 +37,9 @@ class BattleRecorder:
         self._divs = self._open("divisions.tsv", "date\tid\towner\tprovince\tdest\torg\tstrength\tsupply\tarmy"
                                                  "\tunit\ttemplate\tnext\tshare")
         self._ctrl = self._open("control.tsv", "date\tprovince\tcontroller")
+        self._cas = self._open("casualties.tsv", "date\tours\ttheirs")
         self._last = None
-        self.tag = tag
+        self.tag, self.target = tag, target
 
     def _open(self, name, header):
         path = os.path.join(self.folder, name)
@@ -61,5 +66,13 @@ class BattleRecorder:
             if p and (self._last is not None or ctrl[p]):
                 self._ctrl.write(f"{date}\t{p}\t{ctrl[p]}\n")
         self._last = ctrl.copy()
-        for f in (self._status, self._divs, self._ctrl):
+        if at_war:
+            try:
+                cas = wars.casualties(self.tag, self.target)
+            except Exception as e:  # an older bridge, or the game busy: the step is still recorded
+                cas = None
+                print("casualties:", e)
+            if cas:
+                self._cas.write(f"{date}\t{cas[0]}\t{cas[1]}\n")
+        for f in (self._status, self._divs, self._ctrl, self._cas):
             f.flush()
