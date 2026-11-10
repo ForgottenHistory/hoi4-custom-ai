@@ -60,8 +60,9 @@ def main():
         widths = {}
 
     def member(d, rested=False):
-        org = max(d.org, d.max_org) if rested else d.org
-        return (stats.get((d.owner, d.template), battle.DEFAULT), org, d.max_org, d.strength / 100000)
+        st = stats.get((d.owner, d.template), battle.DEFAULT)
+        full = st.get("max_org", 0) * 1000 or d.org
+        return (st, max(d.org, full) if rested else d.org, full, d.strength / 100000)
 
     at = {}
     for d in divs:

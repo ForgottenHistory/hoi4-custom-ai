@@ -12,9 +12,10 @@ from hoi4bridge import send
 # probably its supply level (100000 = fully supplied; 72727 in a starving 23-division stack, 100000 elsewhere),
 # and the id of the army (or front) it is in, 0 if none (+0xb0 -> its COrdersGroup, id at +0xc), and the path it
 # is moving along ({int province ids} vector at +0x1f0, count +0x1fc: the next province first; battle plans move
-# divisions along it without setting the destination at +0x2a4): its length and next province; last the maximum
-# organisation (+0x20). Fixed point x1000; strength 100000 = 100%.
-FIELDS = "c1c8 i1e0.a4 i2a4 i68 i30 s3a8.20 s128.68 i490 ib0.c i1fc i1f0.0 i20"
+# divisions along it without setting the destination at +0x2a4): its length and next province. Fixed point
+# x1000; strength 100000 = 100%. +0x20 is NOT the maximum organisation (86 for infantry whose maximum is 46.9,
+# 195 for tanks at 30): the game computes the maximum, see templates.division_stats "max_org".
+FIELDS = "c1c8 i1e0.a4 i2a4 i68 i30 s3a8.20 s128.68 i490 ib0.c i1fc i1f0.0"
 
 
 class Division:

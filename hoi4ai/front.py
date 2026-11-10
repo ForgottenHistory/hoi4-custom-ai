@@ -237,7 +237,7 @@ class Planner:
     def member(self, d, foe=False):
         """D as a battle.fight member: its template's stats, organisation, best organisation, strength share."""
         st = self.foe_stats.get((d.owner, d.template)) if foe else self.stats.get(d.template)
-        best = d.max_org or (0 if foe else max(self.best_org.get(d.id, 0), self.template_org.get(d.template, 0)))
+        best = (st or {}).get("max_org", 0) * 1000 or (0 if foe else self.max_org(d))
         return (st or battle.DEFAULT, d.org, best, d.strength / 100000)
 
     def odds(self, t, attackers, defenders, with_hours=False):
@@ -277,15 +277,20 @@ class Planner:
     def is_fast(self, d):
         return getattr(d, "unit", None) in self.fast_units
 
-    def org_share(self, d):
-        """Organisation as a share of its maximum when known; else of the best seen, for the division or any
-        division of its template (so a division first seen worn out doesn't count as fresh)."""
-        if getattr(d, "max_org", 0) > 0:
-            return min(1.0, d.org / d.max_org)
+    def max_org(self, d):
+        """A division's maximum organisation (x1000): its template's (templates.division_stats) when known, else
+        the best seen on it or any division of its template (so one first seen worn out doesn't count as fresh)."""
         self.best_org[d.id] = max(self.best_org.get(d.id, 0), d.org)
         self.template_org[d.template] = max(self.template_org.get(d.template, 0), d.org)
-        best = max(self.best_org[d.id], self.template_org[d.template])
-        return d.org / best if best else 0.0
+        t = self.stats.get(d.template)
+        if t and t.get("max_org"):
+            return t["max_org"] * 1000
+        return max(self.best_org[d.id], self.template_org[d.template])
+
+    def org_share(self, d):
+        """Organisation as a share of its maximum."""
+        best = self.max_org(d)
+        return min(1.0, d.org / best) if best else 0.0
 
     def can_attack(self, d, min_share):
         return d.org >= self.s.attack_floor and self.org_share(d) >= min_share

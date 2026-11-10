@@ -223,6 +223,7 @@ def division_stats(fd, bats, sup, held, techs):
             speeds.append((min(base) if base else 4.0) * (1 + mod.get("maximum_speed", 0) + bonus["maximum_speed"]))
         out["combat_width"] += mod.get("combat_width", 0)
         out["max_strength"] += mod.get("max_strength", 0)
+        out["max_org"] += mod.get("max_organisation", 0)
         eqs = [eq_stats(a) for a in need]
         hard.append(max((e.get("hardness", 0) for e in eqs), default=0))
         armor.append(max((e.get("armor_value", 0) for e in eqs), default=0) * (1 + mod.get("armor_value", 0)))
@@ -233,6 +234,9 @@ def division_stats(fd, bats, sup, held, techs):
                     terrain[k][kk] += x
     out["maximum_speed"] = min(speeds) if speeds else 0
     n = max(1, len(units))
+    # the game's maximum organisation: the average over battalions and support companies (doctrines and other
+    # modifiers left out: GER 1939 infantry 48.3 here, 46.9 in the game)
+    out["max_org"] /= n
     # roughly the game's: hardness averaged; armour and piercing weighted toward the best battalion
     out["hardness"] = sum(hard) / n
     out["armor"] = 0.3 * max(armor, default=0) + 0.7 * sum(armor) / n
@@ -294,7 +298,8 @@ def country(tag, divisions, proc, files=None):
         t["rows"].append(s)
     for t in out.values():
         rows = t.pop("rows")
-        for k in COMBAT + ("maximum_speed", "combat_width", "max_strength", "hardness", "armor", "piercing"):
+        for k in COMBAT + ("maximum_speed", "combat_width", "max_strength", "max_org", "hardness", "armor",
+                  "piercing"):
             vals = [r[k] for r in rows]
             t[k] = sum(vals) / len(vals)
             t[k + "_range"] = (min(vals), max(vals))
