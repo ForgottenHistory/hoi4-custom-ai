@@ -261,6 +261,9 @@ def main():
     ap.add_argument("--no-takeover", action="store_true", help="don't block the game AI's army commands")
     ap.add_argument("--no-record", action="store_true", help="don't record the war (hoi4ai/battlerec.py)")
     ap.add_argument("--defend", action="store_true", help="TAG defends against TARGET (hoi4ai/defend.py)")
+    ap.add_argument("--no-hold", action="store_true",
+                    help="don't pause the game while planning (bridge.pause): at high speed the game then runs on, "
+                         "and divisions that arrive wait for the next plan")
     a = ap.parse_args()
     if a.defend and (a.organize or a.plans or a.group):
         raise SystemExit("--defend runs without --organize, --plans or --group")
@@ -468,6 +471,22 @@ def main():
     railing = {}  # division id -> [rail target, last province seen, steps without moving]: on a train, left alone
     war_start = None
     last = None
+    held = False  # we paused the game for this step (bridge.pause); never resume a pause that isn't ours
+
+    def hold():
+        nonlocal held
+        if a.no_hold or a.dry_run:
+            return
+        r = send("bridge.pause")[0]
+        if r == "OK running":
+            held = send("bridge.pause on")[0] == "OK paused"
+
+    def resume():
+        nonlocal held
+        if held:
+            send("bridge.pause off")
+            held = False
+
     print(f"running {tag} against {target}, a plan every {a.hours} in-game hours; logs in {log.folder}")
     try:
         while True:
@@ -483,6 +502,7 @@ def main():
             last = now
             t0 = time.time()
             ticks += 1
+            hold()
             if group_id:
                 r = keep_in_group(group_id, group_armies)
                 if r:
@@ -493,6 +513,7 @@ def main():
             except (OSError, BridgeError, BridgeUnavailable) as e:
                 print("snapshot:", e)
                 last = None
+                resume()
                 time.sleep(1)
                 continue
             if a.defend:
@@ -647,6 +668,7 @@ def main():
             if rec:
                 rec.step(now, divs, ctrl, enemies_of(target) if a.defend else enemy_tags, at_war, capitulated)
                 send(f"bridge.cmdrec mark date={row['date']}")
+            resume()
             if a.defend:
                 print(f"{row['date']} war={row['at_war']} divs={rep['divisions']} line={rep['front']} provinces "
                       f"({rep.get('line_vp', 0):.0%} VP, need {rep.get('line_need', 0)}) VP held={rep.get('held_vp', 0):.0%} "
@@ -670,6 +692,7 @@ def main():
     except KeyboardInterrupt:
         print("stopped")
     finally:
+        resume()
         if rec:
             print(send("bridge.cmdrec off")[0])
         if not a.no_takeover and not a.dry_run:  # the country's army is the game's (or the player's) again
