@@ -57,6 +57,8 @@ class Run:
             if old:  # recorded with the wrong fields: supply was the organisation share, share the strength
                 r["org"], r["strength"], r["supply"] = r["supply"], str(int(float(r.get("share") or 1) * 100000)), "100000"
             self.divs[r["date"]].append(r)
+        cas = os.path.join(folder, "casualties.tsv")  # recorded since 2026-11-10
+        self.casualties = [(r["date"], int(r["ours"]), int(r["theirs"])) for r in read_tsv(cas)] if os.path.exists(cas) else []
         self.control = {}  # date -> {province: controller id} (full, rebuilt from the changes)
         cur = {}
         changes = collections.defaultdict(list)
@@ -170,6 +172,7 @@ def analyse(run, m, names, fast_units, cities):
         "means": {k: round(mean(k), 3) for k in ("attacking", "attacks", "per_attack", "strength", "org",
                                                    "short_supply", "idle", "fast_depth", "fast_attacking",
                                                    "fast_strength")},
+        "casualties": run.casualties[-1][1:] if run.casualties else None,
         "commands": dict(commands.most_common(15)), "series": series,
         "paths": any("next" in x for rows in run.divs.values() for x in rows[:1]),
     }
@@ -206,6 +209,11 @@ def main():
                   "fast_strength": "fast strength %"}
         for k, name in labels.items():
             line(name, [f"{r['means'][k]:.2f}" for r in ok])
+        if any(r["casualties"] for r in ok):  # the war summary's numbers for our war with the target
+            line("casualties ours", [f"{r['casualties'][0]:,}" if r["casualties"] else "-" for r in ok])
+            line("casualties theirs", [f"{r['casualties'][1]:,}" if r["casualties"] else "-" for r in ok])
+            line("theirs per ours", [f"{r['casualties'][1] / max(1, r['casualties'][0]):.2f}" if r["casualties"] else "-"
+                                     for r in ok])
         old = [r["label"] for r in ok if not r["paths"]]
         if old:
             print("(recorded before paths: attacks and idle count only move orders, not battle plans:",
