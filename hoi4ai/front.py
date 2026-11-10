@@ -29,6 +29,10 @@
   defenders on it, and rivers crossed. The infantry's local attacks lean toward the nearest victory point
   (a bigger one pulls harder: a route ends where the cost plus OBJECTIVE_BASE / (1 + victory points / 5) is
   lowest). The fast army and the infantry reserves follow the main axis.
+- Supply: every province draws on its nearest supply hub by land. An area's limit is learned from its divisions:
+  short of supply, about divisions x their supply share; fully supplied at the limit, one more each step.
+  Points, reserves and leftovers go only where there is room; divisions in an overloaded area (resting tanks
+  too) move to the nearest area with room.
 
 Pure logic (no game calls). A Planner keeps state between calls (posts, chosen points, best organisation seen)
 so orders don't flap. plan() returns {division id: province} and a report; self.view holds what it saw.
@@ -91,6 +95,8 @@ class Settings:
     exploit_reach = 8          # fast divisions drive this many provinces deep into empty enemy land
     hub_value = 3.0            # a supply hub is worth this many victory points (per hub level)
     rail_value = 0.5           # a railway province, per railway level
+    supply_short = 0.9         # a supply area whose divisions average below this share of supply is overloaded
+    supply_floor = 2           # a supply area's learned limit never goes below this many divisions
 
 
 class Planner:
@@ -109,9 +115,57 @@ class Planner:
         self.drive = {}             # fast division id -> the empty enemy province it drives to
         self.tick = 0
         self.view = {}
+        self.supply_cap = {}        # supply area (its hub province) -> divisions it can supply (learned)
+        self._area = None
         self._land_nb = {p: [n for n in nb if m.is_land(n)] for p, nb in m.neighbours.items() if m.is_land(p)}
 
     # --- helpers ---------------------------------------------------------------------------------------------
+    def area(self, p):
+        """P's supply area: its nearest supply hub by land (P itself when no hub is in reach)."""
+        if self._area is None:
+            self._area = {}
+            q = collections.deque()
+            for h in self.m.hubs:
+                if h in self._land_nb:
+                    self._area[h] = h
+                    q.append(h)
+            while q:
+                x = q.popleft()
+                for n in self._land_nb[x]:
+                    if n not in self._area:
+                        self._area[n] = self._area[x]
+                        q.append(n)
+        return self._area.get(p, p)
+
+    def learn_supply(self, mine):
+        """Each supply area's limit, from how well the divisions in it are supplied: short of supply, it is about
+        divisions x their supply share; fully supplied at the limit, it grows by one a step."""
+        by = collections.defaultdict(list)
+        for d in mine:
+            by[self.area(d.province)].append(min(1.0, getattr(d, "supply", 100000) / 100000))
+        for a, shares in by.items():
+            n, share = len(shares), sum(shares) / len(shares)
+            if share < self.s.supply_short:
+                self.supply_cap[a] = max(self.s.supply_floor, n * share)
+            elif a in self.supply_cap and n >= self.supply_cap[a]:
+                self.supply_cap[a] += 1
+        for a in self.supply_cap:
+            if a not in by:
+                self.supply_cap[a] += 1  # nobody there to measure: it recovers slowly
+
+    def room(self, aload, p):
+        """How many more divisions P's supply area takes, given AALOAD per area (inf when never short)."""
+        a = self.area(p)
+        return self.supply_cap.get(a, math.inf) - aload.get(a, 0)
+
+    def area_load(self, load):
+        """{province: divisions} -> {supply area: divisions}."""
+        out = collections.Counter()
+        for p, v in load.items():
+            if p is not None:
+                out[self.area(p)] += v
+        return out
+
     def nb(self, p):
         return self._land_nb.get(p, ())
 
@@ -272,14 +326,16 @@ class Planner:
         order += sorted((q for q in dist if q not in sec),
                         key=lambda q: (dist[q], q not in front, score.get(q, math.inf)))
         used = []
+        aload = self.area_load(load)
         for q in order:
             if n <= 0:
                 break
-            take = min(n, self.s.max_stack - load.get(q, 0))
+            take = min(n, self.s.max_stack - load.get(q, 0), max(0, int(min(n, self.room(aload, q)))))
             if take <= 0:
                 continue
             demand[q] = demand.get(q, 0) + take
             load[q] = load.get(q, 0) + take
+            aload[self.area(q)] += take
             used.append(q)
             n -= take
         return used
@@ -304,6 +360,7 @@ class Planner:
         mine = [d for d in divisions if d.owner == my_tag and d.province in land]
         for d in mine:  # see every division's organisation first, so template bests are known this step
             self.org_share(d)
+        self.learn_supply(mine)
         foe_power = collections.Counter()
         for d in divisions:
             if d.owner != my_tag and d.province in land and ctrl[d.province] in hostile:
@@ -639,9 +696,14 @@ class Planner:
         # at war a worn-out fast division rests where it stands (on our land) instead of walking back to the breach
         resting = {d.id for d in fast if at_war and d.province in own and d.id not in attacking
                    and not self.can_attack(d, s.fast_min_org)}
+        # ... unless its supply area is overloaded: then it rests in the nearest area with room
+        in_area = collections.Counter(self.area(d.province) for d in mine)
+        crowded = {d.id for d in fast if d.id in resting
+                   and in_area[self.area(d.province)] > self.supply_cap.get(self.area(d.province), math.inf)}
+        resting -= crowded
         report["resting"] = len(resting)
         for group, demand in ((line, line_demand), ([d for d in fast if d.id not in resting], fast_demand)):
-            unposted += self._assign(group, demand, own, attacking, ctrl, hostile, orders, zones, front)
+            unposted += self._assign(group, demand, own, attacking, ctrl, hostile, orders, zones, front, crowded)
         for did, p in orders.items():
             if did not in attacking:
                 self.hold[did] = p
@@ -652,10 +714,13 @@ class Planner:
                       unposted=unposted, enemy_power=round(sum(foe_power.values()), 1),
                       our_power=round(sum(power(d) for d in mine), 1), goal=goal or 0,
                       short_of_supply=sum(1 for d in mine if getattr(d, "supply", 100000) < 95000),
-                      max_stack=max(collections.Counter(d.province for d in mine).values(), default=0))
+                      max_stack=max(collections.Counter(d.province for d in mine).values(), default=0),
+                      overloaded=sum(1 for a, c in self.supply_cap.items() if in_area[a] > c),
+                      over_supply=round(sum(max(0, in_area[a] - c) for a, c in self.supply_cap.items())))
         return orders, report
 
-    def _assign(self, group, demand, own, attacking, ctrl, hostile, orders, zones=None, front=()):
+    def _assign(self, group, demand, own, attacking, ctrl, hostile, orders, zones=None, front=(), rear=()):
+        """REAR: divisions that only need a supplied place to rest (the nearest area with room)."""
         zoned = set(zones.values()) if zones else set()
 
         def allowed(d, p):
@@ -668,6 +733,9 @@ class Planner:
                 continue
             if d.moving and d.dest in self._land_nb and ctrl[d.dest] in hostile:
                 continue  # an attack under way: let it finish
+            if d.id in rear:
+                free.append(d)
+                continue
             p = self.hold.get(d.id)
             if p in left and left[p] > 0 and allowed(d, p):
                 left[p] -= 1
@@ -693,20 +761,32 @@ class Planner:
         pairs.sort()
         done = set()
         for _, did, p in pairs:
-            if did in done or left[p] <= 0:
+            if did in done or left[p] <= 0 or did in rear:
                 continue
             left[p] -= 1
             done.add(did)
             orders[did] = p
         load = collections.Counter(orders.get(d.id) for d in group)
+        aload = self.area_load(collections.Counter(orders.values()))
         for d in free:  # all posts full or out of reach: the least crowded front province or post (its own zone's)
             if d.id in done or d.province not in dist_cache:
                 continue
             dc = dist_cache[d.province]
+            if d.id in rear or self.room(aload, d.province) < 0:
+                # resting, or left over where supply is overloaded: the nearest province of an area with room,
+                # away from the front if possible
+                cands = [(q in front, dc[q], q) for q in dc if q in own and self.room(aload, q) >= 1]
+                if cands:
+                    p = min(cands)[-1]
+                    orders[d.id] = p
+                    aload[self.area(p)] += 1
+                    done.add(d.id)
+                continue
             # nearby first; each division already there counts as two steps further (they spread locally). An
             # army whose zone is full (the front moved on: its stretch may have one front province left) spills
             # into nearby front provinces outside it rather than piling up on one
             cands = [p for p in posts + [q for q in spill if dc.get(q, 99) <= self.s.spill_reach] if p in dc]
+            cands = [p for p in cands if self.room(aload, p) >= 1] or cands
             key = lambda p: (load[p] // self.s.max_stack, dc[p] + 2 * load[p], p)
             near = [key(p) for p in cands if allowed(d, p)]
             if not near or min(near)[0] > 0:
@@ -718,5 +798,6 @@ class Planner:
                 p = min(near)[-1]
                 orders[d.id] = p
                 load[p] += 1
+                aload[self.area(p)] += 1
                 done.add(d.id)
         return len(free) - len(done)
