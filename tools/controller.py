@@ -443,7 +443,9 @@ def main():
         else:
             print("battle plans: no border with", target, "found" if not secs else "", "or no victory points")
     ticks = 0
-    can_stop = send("bridge.stop")[0].startswith("FAIL usage: bridge.stop")
+    # attacks are called off with a move back to the division's own province: bridge.stop (the game's
+    # CancelMovement) clears the path but leaves the attack's target set, and the division stays in the battle
+    can_stop = False
     can_rail = send("bridge.rail")[0].startswith("FAIL usage: bridge.rail")
     print("stopping attacks with", "bridge.stop" if can_stop else "a move back to the division's own province")
     protected = set()
