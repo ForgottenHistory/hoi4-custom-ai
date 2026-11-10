@@ -451,7 +451,10 @@ def main():
             same = {}
             zone_specs = [(aid, same.setdefault(tuple(sorted(b.items())), b), lo, hi) for aid, b, lo, hi in zone_specs]
             print(f"keeping the battle plans of armies {sorted(planned)}")
-    if a.plans and group_armies and not a.dry_run and not planned:
+    def draw_plans():
+        """Battle plans for every army at the border with the target: the game's fronts with it only exist in
+        war, so before the war this finds none and is tried again when the war starts. True when drawn."""
+        nonlocal planned, drawn, zone_specs
         from hoi4ai.memory import Process
         provinces.refresh()
         divs0 = take()
@@ -512,6 +515,11 @@ def main():
                       open(state_path, "w", encoding="utf-8"))
         else:
             print("battle plans: no border with", target, "found" if not secs else "", "or no victory points")
+        return bool(planned)
+
+    plans_tried_at_war = False
+    if a.plans and group_armies and not a.dry_run and not planned:
+        draw_plans()
     ticks = 0
     # attacks are called off with a move back to the division's own province: bridge.stop (the game's
     # CancelMovement) clears the path but leaves the attack's target set, and the division stays in the battle
@@ -676,6 +684,9 @@ def main():
             at_war = target in enemy_tags
             if at_war and war_start is None:
                 war_start = now
+            if at_war and a.plans and group_armies and not a.dry_run and not planned and not plans_tried_at_war:
+                plans_tried_at_war = True  # the war just made the fronts the plans are drawn on
+                draw_plans()
             mark("wars")
             if drawn and not a.dry_run:
                 # the game sometimes drops an army's front line or offensive line on its own (no command does it;
