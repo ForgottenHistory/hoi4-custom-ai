@@ -82,23 +82,45 @@ def friends_of(tag):
     return _tags(lines)
 
 
+def _object_addresses(type_, ids):
+    """{id: address} of the objects with handle {TYPE_, id}, in one request (one request takes a game frame)."""
+    ids = list(dict.fromkeys(ids))
+    out = {}
+    for oid, r in zip(ids, send(*[f"bridge.object {type_} {i}" for i in ids]) if ids else []):
+        m = re.search(r"@0x([0-9a-fA-F]+)", r)
+        out[oid] = int(m.group(1), 16) if m else 0
+    return out
+
+
 def _object_address(type_, oid):
-    m = re.search(r"@0x([0-9a-fA-F]+)", send(f"bridge.object {type_} {oid}")[0])
-    return int(m.group(1), 16) if m else 0
+    return _object_addresses(type_, [oid])[oid]
+
+
+_proc = []
 
 
 def _pointer_at(addr):
-    r = send(f"bridge.mem {addr:x} 8")[0]
-    if not r.startswith("OK"):
+    """The 8 bytes at ADDR, read from the game's memory directly (no bridge request); 0 if unreadable."""
+    from hoi4ai.memory import Process
+    if not addr:
         return 0
-    return int.from_bytes(bytes.fromhex(r[3:].strip().replace("?", "0")), "little")
+    for attempt in range(2):
+        if not _proc:
+            _proc.append(Process())
+        try:
+            v = _proc[0].u64(addr)
+            return v or 0
+        except Exception:
+            _proc.clear()  # the game restarted: open it again
+    return 0
 
 
 def keep_in_group(gid, army_ids):
     """Put back armies that are no longer in the army group (an army's group is at +0x1b8). Only the missing ones:
     assigning an army that is already in the group makes the game re-order it. Returns the reply, or None."""
-    group = _object_address(53, gid)
-    missing = [a for a in army_ids if _pointer_at(_object_address(53, a) + 0x1b8) != group]
+    at = _object_addresses(53, [gid, *army_ids])
+    group = at[gid]
+    missing = [a for a in army_ids if _pointer_at(at[a] + 0x1b8 if at[a] else 0) != group]
     if not group or not missing:
         return None
     return send(f"bridge.army assign {gid} " + " ".join(map(str, missing)))[0]
@@ -111,10 +133,13 @@ def keep_leaders(tag, gid, army_ids, cache, other_armies=()):
     ARMY_IDS in priority order (the fast army first); OTHER_ARMIES keep their generals (theirs aren't free). Only
     leaders the game lets command now are chosen (leaders.usable). Returns lines describing what changed."""
     lead = leaders_mod.load(tag, os.path.join(cache, "leaders.tsv"))
-    by_addr = {_object_address(4713, l.id): l for l in lead}
-    current = {a: by_addr.get(_pointer_at(_object_address(53, a) + 0x88)) for a in army_ids}
+    where = _object_addresses(4713, [l.id for l in lead])
+    by_addr = {where[l.id]: l for l in lead if where[l.id]}
+    armies = _object_addresses(53, [*army_ids, *other_armies, *([gid] if gid else [])])
+    led_by = lambda a: by_addr.get(_pointer_at(armies[a] + 0x88 if armies[a] else 0))
+    current = {a: led_by(a) for a in army_ids}
     used = {l.id for l in current.values() if l}
-    used |= {l.id for l in (by_addr.get(_pointer_at(_object_address(53, a) + 0x88)) for a in other_armies) if l}
+    used |= {l.id for l in map(led_by, other_armies) if l}
     lead = leaders_mod.usable(tag, lead)
     free = sorted((l for l in lead if not l.field_marshal and l.id not in used), key=lambda l: (-l.attack, -l.planning))
     lines = []
@@ -128,7 +153,7 @@ def keep_leaders(tag, gid, army_ids, cache, other_armies=()):
         r = send(f"bridge.army leader {a} {g.id}")[0]
         lines.append(f"army {a}: general {g.name} (attack {g.attack})" + ("" if r.startswith("OK") else f": {r}"))
     if gid:
-        l = by_addr.get(_pointer_at(_object_address(53, gid) + 0x88))
+        l = led_by(gid)
         marshals = sorted((x for x in lead if x.field_marshal), key=lambda x: (-x.attack, -x.planning))
         if marshals and not (l and l.field_marshal):
             fm = marshals[0]
@@ -291,24 +316,40 @@ def main():
     def load_stats(divs):
         from hoi4ai import templates
         from hoi4ai.memory import Process
-        try:
-            st = templates.country(tag, divs, Process())
-        except Exception as e:  # the plan works without (every division counts as the main infantry)
-            print("template stats:", e)
-            return
-        planner.set_stats(st)
-        # the enemies' templates too, for the battle estimate (unknown ones count as a plain infantry division)
-        for t in sorted(set(enemies_of(tag)) | {target}):
+        proc = Process()
+        st = planner.stats
+        if not st or any(d.owner == tag and d.template not in st for d in divs):
             try:
-                foe = templates.country(t, [d for d in divs if d.owner == t], Process())
+                st = templates.country(tag, divs, proc)
+            except Exception as e:  # the plan works without (every division counts as the main infantry)
+                print("template stats:", e)
+                return
+            planner.set_stats(st)
+        # the enemies' templates too, for the battle estimate (unknown ones count as a plain infantry division);
+        # each country costs a few hundred ms, so only those with troops near our or the target's land, and only
+        # when one of their templates is new
+        ctrl = provinces.controller
+        near = {p for p in m.provinces if m.is_land(p) and ctrl[p] in (me, tgt)}
+        near |= {q for p in near for q in m.land_neighbours(p)}
+        foes = set(enemies_of(tag)) | {target}
+        todo = sorted({d.owner for d in divs if d.owner in foes and (d.owner == target or d.province in near)
+                       and (d.owner, d.template) not in planner.foe_stats})
+        for t in todo:
+            try:
+                foe = templates.country(t, [d for d in divs if d.owner == t], proc)
             except Exception as e:
                 print("template stats", t + ":", e)
                 continue
             planner.foe_stats.update({(t, n): x for n, x in foe.items()})
-        try:
-            planner.widths.update(templates.terrain_widths())
-        except OSError as e:
-            print("terrain widths:", e)
+            # templates the files don't know: remember them as unknown so they don't trigger a reload every day
+            planner.foe_stats.update({(t, d.template): None for d in divs if d.owner == t
+                                      and (t, d.template) not in planner.foe_stats})
+        if not getattr(planner, "widths_loaded", False):
+            planner.widths_loaded = True
+            try:
+                planner.widths.update(templates.terrain_widths())
+            except OSError as e:
+                print("terrain widths:", e)
         print("templates: " + "; ".join(f"{n} x{t['count']} soft {t['soft_attack']:.0f} -> "
                                          f"{planner.quality(type('D', (), {'template': n})()):.2f}"
                                          for n, t in sorted(st.items(), key=lambda x: -x[1]['count'])))
@@ -503,13 +544,22 @@ def main():
             t0 = time.time()
             ticks += 1
             hold()
+            phases = []  # (name, seconds since the last mark): where a step's time goes
+            mark_t = [time.perf_counter()]
+
+            def mark(name):
+                t = time.perf_counter()
+                phases.append((name, t - mark_t[0]))
+                mark_t[0] = t
             if group_id:
                 r = keep_in_group(group_id, group_armies)
                 if r:
                     print("army group, put back:", r)
+            mark("group")
             try:
                 provinces.refresh()
                 divs = take()
+                mark("read")
             except (OSError, BridgeError, BridgeUnavailable) as e:
                 print("snapshot:", e)
                 last = None
@@ -526,18 +576,21 @@ def main():
                     d.owner == target and (d.owner, d.template) not in planner.foe_stats for d in divs)):
                 stats_day = now.date()
                 load_stats(divs)
+            mark("stats")
             if army_order and not a.dry_run and now.date() != leader_day:  # once a day: generals and field marshal
                 leader_day = now.date()
                 # every army of ours: the group's first (the fast one first), then the others (garrisons, exclaves)
                 others = sorted({d.army for d in divs if d.owner == tag and d.army} - set(army_order) - {group_id})
                 for line in keep_leaders(tag, group_id, list(army_order) + others, os.path.join(REPO, ".cache")):
                     print(line)
+            mark("leaders")
             enemy_tags = enemies_of(tag)
             enemy_ids = [ids[t] for t in enemy_tags if t in ids]
             friend_ids = [ids[t] for t in friends_of(tag) if t in ids]
             at_war = target in enemy_tags
             if at_war and war_start is None:
                 war_start = now
+            mark("wars")
             if drawn and not a.dry_run:
                 # the game sometimes drops an army's front line or offensive line on its own (no command does it;
                 # two armies lost theirs when the war was declared): draw it again. In war only a lost front line
@@ -566,6 +619,7 @@ def main():
                 for line in plans.execute(sorted(planned)):
                     print(line)
                 executed = True
+            mark("lines")
             # with --execute, divisions of armies on a battle plan are the game's to move
             # each army with a front line holds its own stretch (where its plan is)
             zone = plans.zones(m, zone_specs, provinces.controller, {me, *friend_ids}) if zone_specs else None
@@ -584,6 +638,7 @@ def main():
                                            [d for d in divs if not (a.execute and d.owner == tag and d.army in planned)],
                                            tag, enemy_ids, tgt, at_war, friend_ids, zones=zone)
                 stops = planner.stops
+            mark("plan")
             mine = {d.id: d for d in divs if d.owner == tag}
             if membership and not a.dry_run:  # divisions that drifted out of their army go back
                 strays = collections.defaultdict(list)
@@ -598,6 +653,7 @@ def main():
             if new and not a.dry_run:
                 send("bridge.protect add " + " ".join(map(str, new)))
                 protected.update(new)
+            mark("armies")
             sent = failed = 0
             cmds, batch = [], []
             for did, r in list(railing.items()):  # trains: arrived, stuck (no progress for 2 steps) or the war began
@@ -651,6 +707,7 @@ def main():
                         sent += ok
                         failed += not ok
                         log.move(now, d, prov, kind, "ok" if ok else r)
+            mark("orders")
             ctrl = provinces.controller
             if a.defend:  # our land, and how much of it the enemy holds
                 target_land = [p for p in m.provinces if m.is_land(p) and provinces.owner[p] == me]
@@ -660,6 +717,7 @@ def main():
                 target_land = [p for p in m.provinces if m.is_land(p) and provinces.owner[p] == tgt]
                 taken = sum(1 for p in target_land if ctrl[p] == me)
                 capitulated = at_war and trigger(f"{target} = {{ has_capitulated = yes }}")
+            mark("status")
             row = dict(date=now.strftime("%Y-%m-%d %H:00"), at_war=int(at_war), enemies=" ".join(enemy_tags),
                        **rep, orders=len(orders), moves=sent, failed=failed,
                        target_provinces=len(target_land), taken=taken, capitulated=int(capitulated),
@@ -668,6 +726,10 @@ def main():
             if rec:
                 rec.step(now, divs, ctrl, enemies_of(target) if a.defend else enemy_tags, at_war, capitulated)
                 send(f"bridge.cmdrec mark date={row['date']}")
+                mark("record")
+            slow = sum(x for _, x in phases)
+            if slow > 0.3:
+                print("  slow step %.1f s: " % slow + " ".join("%s %.0f" % (n, x * 1000) for n, x in phases if x > 0.05))
             resume()
             if a.defend:
                 print(f"{row['date']} war={row['at_war']} divs={rep['divisions']} line={rep['front']} provinces "

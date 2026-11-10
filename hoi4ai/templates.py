@@ -264,27 +264,46 @@ def researched(tag, fd):
     return {t for t, r in zip(names, replies) if r.rstrip().endswith("yes")}
 
 
-def _address(did):
-    m = None
+def _addresses(ids, chunk=100):
+    """{division id: CArmy address} in a few batched requests (one request takes a game frame, ~16 ms)."""
+    out, todo = {}, list(ids)
     for t in (51, 4713):  # a division made later in a loaded game can be type 4713 (see divisions.Snapshotter)
-        r = send(f"bridge.object {t} {did}")[0]
-        m = re.search(r"@0x([0-9a-fA-F]+)", r) if r.startswith("OK CArmy") else None
-        if m:
+        left = []
+        for i in range(0, len(todo), chunk):
+            part = todo[i:i + chunk]
+            for did, r in zip(part, send(*[f"bridge.object {t} {did}" for did in part])):
+                m = re.search(r"@0x([0-9a-fA-F]+)", r) if r.startswith("OK CArmy") else None
+                if m:
+                    out[did] = int(m.group(1), 16)
+                else:
+                    left.append(did)
+        todo = left
+        if not todo:
             break
-    return int(m.group(1), 16) if m else 0
+    return out
+
+
+_files = {}
+
+
+def _file_data(files):
+    """FileData, read once per files folder (the game's files don't change while it runs)."""
+    if files not in _files:
+        _files[files] = FileData(files)
+    return _files[files]
 
 
 def country(tag, divisions, proc, files=None):
     """{template name: {"count", "battalions", "support", "equipment": {variant: amount}, stats..., "min"/"max"
     of soft attack and speed over its divisions}} for TAG's DIVISIONS (hoi4ai.divisions.Division)."""
-    fd = FileData(files)
+    fd = _file_data(files)
     techs = researched(tag, fd)
     rd = Reader(proc)
     out = {}
-    for d in divisions:
-        if d.owner != tag:
-            continue
-        a = _address(d.id)
+    mine = [d for d in divisions if d.owner == tag]
+    where = _addresses([d.id for d in mine]) if mine else {}
+    for d in mine:
+        a = where.get(d.id)
         if not a:
             continue
         name, bats, sup, held = rd.division(a)
