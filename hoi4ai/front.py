@@ -93,6 +93,7 @@ class Settings:
     fast_cutoff = 6.0          # ... and a point pulls nothing beyond this many fast_reach (e^-6)
     fast_objectives = 150      # at most this many points pull the fast army (the most valuable)
     fast_foe_weight = 2.0      # fast army: defenders count this much more on its routes (tanks go around strength)
+    target_front_only = True   # plan the front against the target only, not its allies' borders
     max_stack = 6              # divisions per province we plan for (more starve: supply, attrition)
     spill_reach = 8            # divisions left over when every post is full go to a front province this close
     axis_tie = 1.15            # fast army starts within this much of the best route compete on how they split the enemy
@@ -236,9 +237,8 @@ class Planner:
         """D as a battle.fight member: its template's stats, organisation, best organisation, strength share."""
         st = self.foe_stats.get((d.owner, d.template)) if foe else self.stats.get(d.template)
         best = (st or {}).get("max_org", 0) * 1000
-        if not best:  # template unknown: the raw values (same scale, so the share is right)
-            return (st or battle.DEFAULT, d.org, d.org / d.share if d.share else d.org, d.strength / 100000)
-        return (st, d.share * best, best, d.strength / 100000)
+        best = best or 40000  # template unknown: a typical maximum
+        return (st or battle.DEFAULT, d.share * best, best, d.strength / 100000)
 
     def odds(self, t, attackers, defenders, with_hours=False):
         """Estimated chance ATTACKERS (ours, standing next to T) beat DEFENDERS (in T); with WITH_HOURS also how
@@ -284,7 +284,7 @@ class Planner:
     def org_now(self, d):
         """Organisation as the game shows it (x1000): the share of its template's maximum."""
         t = self.stats.get(d.template)
-        return d.share * t["max_org"] * 1000 if t and t.get("max_org") else d.org
+        return d.share * (t["max_org"] * 1000 if t and t.get("max_org") else 40000)
 
     def can_attack(self, d, min_share):
         return self.org_now(d) >= self.s.attack_floor and self.org_share(d) >= min_share
@@ -403,6 +403,10 @@ class Planner:
         facing = {p: [q for q in self.nb(p) if ctrl[q] in hostile] for p in own}
         front = {p for p, f in facing.items() if f}
         main = {p for p in front if any(ctrl[q] == target for q in facing[p])}
+        if s.target_front_only and main:
+            # other enemies' borders (France joining a war on Poland) are left to the armies the player keeps
+            # (controller --leave): spreading the infantry over them pulled it away from the target
+            front = main
 
         enemy_land = {p for p in land if ctrl[p] in hostile}
         # objectives: the target's victory points; its main body: its largest connected piece of land

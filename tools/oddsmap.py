@@ -61,7 +61,7 @@ def main():
 
     def member(d, rested=False):
         st = stats.get((d.owner, d.template), battle.DEFAULT)
-        full = st.get("max_org", 0) * 1000 or (d.org / d.share if d.share else d.org)
+        full = st.get("max_org", 0) * 1000 or 40000
         return (st, full if rested else d.share * full, full, d.strength / 100000)
 
     at = {}

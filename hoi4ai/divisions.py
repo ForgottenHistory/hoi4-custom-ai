@@ -4,8 +4,8 @@ import time
 
 from hoi4bridge import send
 
-# CArmy (handle 51) fields: owner, province, destination (0 = none), organisation (+0x68, on the scale of +0x20:
-# neither is what the game shows, but +0x68 / +0x20 is the share of the maximum, 0..1), strength, template name,
+# CArmy (handle 51) fields: owner, province, destination (0 = none), +0x68 (NOT organisation: 0 for a division
+# at full organisation; kept for the rough power()), strength, template name,
 # main sub-unit sprite (the map counter's: +0x128 -> a CSubUnitDefinition whose key at +0x18 is "---"; its
 # sprite at +0x68 is "infantry" for mountaineers, "light_armor" / "motorized" for those, so it tells fast from
 # slow; the template's battalions are in hoi4ai/templates.py), and +0x490,
@@ -13,10 +13,10 @@ from hoi4bridge import send
 # and the id of the army (or front) it is in, 0 if none (+0xb0 -> its COrdersGroup, id at +0xc), and the path it
 # is moving along ({int province ids} vector at +0x1f0, count +0x1fc: the next province first; battle plans move
 # divisions along it without setting the destination at +0x2a4): its length and next province. Fixed point
-# x1000; strength 100000 = 100%. Last +0x20, the top of +0x68's scale (86 for infantry whose maximum is 46.9 in
-# the game, 174 for artillery infantry at 28.1, 195 for tanks at about 30): the game computes the maximum it
-# shows, see templates.division_stats "max_org"; organisation as the game shows it = share x that.
-FIELDS = "c1c8 i1e0.a4 i2a4 i68 i30 s3a8.20 s128.68 i490 ib0.c i1fc i1f0.0 i20"
+# x1000; strength 100000 = 100%. Last +0x458, probably organisation as a share of the maximum (100000 = full:
+# every rested German and Polish division, while China's and Japan's at war are the lowest; 2026-11-10). The
+# maximum isn't stored: see templates.division_stats "max_org"; organisation as the game shows it = share x that.
+FIELDS = "c1c8 i1e0.a4 i2a4 i68 i30 s3a8.20 s128.68 i490 ib0.c i1fc i1f0.0 i458"
 
 
 class Division:
@@ -24,12 +24,11 @@ class Division:
                  "next", "share")
 
     def __init__(self, did, owner, province, dest, org, strength, template, unit="", supply=100000, army=0, path=0,
-                 nxt=0, cap=0):
+                 nxt=0, share=100000):
         self.id, self.owner, self.province, self.dest = did, owner, province, dest
         self.org, self.strength, self.template, self.unit, self.supply = org, strength, template, unit, supply
         self.army = army
-        # organisation as a share of its maximum (1.0 when the scale isn't known)
-        self.share = min(1.0, max(0.0, org / cap)) if cap > 0 else 1.0
+        self.share = min(1.0, max(0.0, share / 100000))  # organisation as a share of its maximum
         self.path, self.next = path, nxt if path else 0  # the next province, 0 when not moving
 
     @property
@@ -75,7 +74,7 @@ class Snapshotter:
                                               p[7] if len(p) > 7 else "", int(p[8]) if len(p) > 8 else 100000,
                                               int(p[9]) if len(p) > 9 and p[9].lstrip("-").isdigit() else 0,
                                               int(p[10]) if len(p) > 11 else 0, int(p[11]) if len(p) > 11 else 0,
-                                              int(p[12]) if len(p) > 12 else 0)
+                                              int(p[12]) if len(p) > 12 else 100000)
                 except ValueError:
                     continue
         # strength 0 and org 0: at sea or deploying, not on the map
