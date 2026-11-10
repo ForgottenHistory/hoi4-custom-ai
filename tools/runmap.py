@@ -105,7 +105,7 @@ def main():
             foe_tags = {target}
         foe_ids = {run.ids[t] for t in foe_tags if t in run.ids}
         if len(a.day) > 1:
-            label = f"{label}, day {at:.1f}" if len(runs) > 1 else f"Day {at:.1f}"
+            label = f"{label}, day {at:.1f}" if len(runs) > 1 or a.labels else f"Day {at:.1f}"
         ctrl = run.control[date]
         first = run.control[min(run.control)]
         was_target = {p for p, c in first.items() if c in foe_ids}
