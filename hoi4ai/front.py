@@ -10,10 +10,13 @@
   fight better than two from one.
 - Infantry is split evenly over the whole front (a player's rule): every province facing the enemy gets the same
   number, up to max_stack, the main front and the strongest enemy first for the remainder. Only what is left once
-  the front is full stands behind the fast army. Infantry attacks locally where it clearly outweighs the
-  defenders.
+  the front is full stands behind the fast army.
+- Attacks are decided by a rough battle estimate (hoi4ai/battle.py: both sides' template stats, organisation,
+  strength, supply, terrain, combat width, rivers). All-out: the infantry attacks every enemy province next to it
+  it should win (infantry_win), sending what stands around until the chance is high (infantry_goal).
 - Fast divisions (armour, motorised: see units.py) form one breakthrough army. Before the war it deploys at the
-  start of the best route to the enemy's heart; at war it attacks along that route and keeps going (exploits),
+  start of the best route to the enemy's heart; at war its tanks attack along that route (the spearhead: armour,
+  attack, breakthrough) while motorised and the rest pour into the gaps, and it keeps going (exploits),
   always toward the cheapest way on to the main objective: the most valuable province of the enemy's main body
   (its largest connected piece of land; pockets are left to the infantry).
 - Once there is empty enemy land, every ready fast division drives into it on its own: each to its own target
@@ -41,6 +44,8 @@ import collections
 import heapq
 import math
 
+from hoi4ai import battle
+
 # cost of moving and fighting through a province, by terrain (plains = 1)
 TERRAIN_COST = {"plains": 1.0, "desert": 1.0, "urban": 1.5, "forest": 2.0, "hills": 2.0, "jungle": 3.0,
                 "marsh": 3.0, "mountain": 4.0}
@@ -50,7 +55,6 @@ TERRAIN_WIDTH = {"plains": (70, 35), "desert": (70, 35), "hills": (70, 35), "urb
                  "jungle": (60, 30), "marsh": (50, 25), "mountain": (50, 25)}
 DIVISION_WIDTH = 18  # a division whose template we don't know (9 infantry battalions)
 RIVER_COST = {0: 0.0, 1: 1.0, 2: 2.0}        # added to a route for crossing a small / large river
-RIVER_ATTACK = {0: 1.0, 1: 1.25, 2: 1.5}     # extra strength wanted to attack across one
 FULL_DIVISION = 80.0
 OBJECTIVE_BASE = 8.0  # power (organisation x strength) of a fresh 1939 infantry division
 
@@ -61,20 +65,26 @@ def power(d):
 
 
 class Settings:
-    attack_margin = 1.3        # infantry attacks when its power >= margin x enemy power x terrain cost (a player
-                               # had twice our divisions fighting in the first days)
+    # attacks are decided by the battle estimate (hoi4ai/battle.py): attack when the win chance reaches *_win,
+    # and send attackers until it reaches *_goal (or the cap / combat width is reached). All-out: the infantry
+    # pushes everywhere it should win
+    infantry_win = 0.6
+    infantry_goal = 0.85
+    infantry_hours = 48        # ... and until the fight should be over within this many hours (a quick win costs
+                               # less organisation and keeps the push going)
+    infantry_hold = False      # True: one division stays home in a province that faces other defenders
+    spear_win = 0.55           # the tanks (spearhead)
+    spear_goal = 0.9
+    spear_hours = 24
+    stop_win = 0.3             # attacks under way are called off below this chance
     infantry_reach = 4         # infantry drives into empty enemy land up to this many provinces away
     infantry_drive_share = 0.5  # share of the free infantry that may start a drive each step
-    fast_margin = 1.1          # the same for the fast army
     armor_factor = 1.8         # an armoured division (main unit in the armor group) counts this much more when it
                                # attacks: its armour against defenders with little piercing (1939 infantry)
     attack_min_org = 0.55      # share of a division's best organisation it needs to attack
     fast_min_org = 0.40
     stop_org = 0.30            # an attacker below this share of its best organisation stops attacking
     attack_floor = 10000       # no attack below 10 organisation, whatever the share
-    fast_overkill = 6.0        # an attack takes up to this many times the strength it needs (cap permitting):
-                               # for the fast army about everyone next to the province (its power is overrated)
-    infantry_overkill = 2.0
     fast_cap = 5               # fast divisions sent at one province (the rest look for other openings)
     infantry_cap = 6           # infantry divisions sent at one province
     width_slack = 1.25         # attackers fill the battle's combat width up to this much (a few in reserve
@@ -101,6 +111,7 @@ class Planner:
     def __init__(self, m, me, fast_units=(), settings=None, armored_units=(), stats=None):
         self.m, self.me = m, me
         self.stats, self.ref_soft = {}, {}
+        self.foe_stats = {}         # (owner tag, template name) -> stats (templates.country), for the estimate
         self.set_stats(stats or {})
         self.widths = dict(TERRAIN_WIDTH)
         self.fast_units = set(fast_units)
@@ -222,6 +233,30 @@ class Planner:
         if target is not None and target in self.m.provinces:
             q *= 1.0 + t.get("terrain", {}).get(self.m.provinces[target].terrain, {}).get("attack", 0.0)
         return q
+
+    def member(self, d, foe=False):
+        """D as a battle.fight member: its template's stats, organisation, best organisation, strength share."""
+        st = self.foe_stats.get((d.owner, d.template)) if foe else self.stats.get(d.template)
+        best = d.max_org or (0 if foe else max(self.best_org.get(d.id, 0), self.template_org.get(d.template, 0)))
+        return (st or battle.DEFAULT, d.org, best, d.strength / 100000)
+
+    def odds(self, t, attackers, defenders, with_hours=False):
+        """Estimated chance ATTACKERS (ours, standing next to T) beat DEFENDERS (in T); with WITH_HOURS also how
+        many hours the fight would take."""
+        if not defenders or not attackers:
+            win = 1.0 if not defenders else 0.0
+            return (win, 0) if with_hours else win
+        dirs = {d.province for d in attackers}
+        river = max(self.m.river(d.province, t) for d in attackers)
+        a_sup = sum(min(1.0, d.supply / 100000) for d in attackers) / len(attackers)
+        d_sup = sum(min(1.0, d.supply / 100000) for d in defenders) / len(defenders)
+        win, hours = battle.fight([self.member(d) for d in attackers], [self.member(d, True) for d in defenders],
+                                  self.m.provinces[t].terrain, self.battle_width(t, len(dirs)), len(dirs), river,
+                                  a_sup, d_sup)
+        return (win, hours) if with_hours else win
+
+    def is_armored(self, d):
+        return getattr(d, "unit", None) in self.armored_units
 
     def width(self, d):
         """A division's combat width (its template's)."""
@@ -360,9 +395,11 @@ class Planner:
             self.org_share(d)
         self.learn_supply(mine)
         foe_power = collections.Counter()
+        foes_at = collections.defaultdict(list)
         for d in divisions:
             if d.owner != my_tag and d.province in land and ctrl[d.province] in hostile:
                 foe_power[d.province] += power(d)
+                foes_at[d.province].append(d)
 
         facing = {p: [q for q in self.nb(p) if ctrl[q] in hostile] for p in own}
         front = {p for p, f in facing.items() if f}
@@ -517,17 +554,20 @@ class Planner:
                 if d.moving and d.dest in land and ctrl[d.dest] in hostile:
                     under_way[d.dest].append(d)
 
-            def attack(targets, eligible, margin, min_org, keep_home, label, cap, overkill=1.0):
-                # NEED (margin x defenders x terrain) decides whether to attack; then up to OVERKILL x NEED is sent,
-                # within CAP: more attackers end a battle sooner (a player sends what stands next to the province).
-                # Only what fits the battle's combat width fights, and every province attacked from widens it: the
-                # attackers are taken from the provinces around in turn, and one that wouldn't fit is left out
+            def attack(targets, eligible, min_win, goal, quick, min_org, keep_home, label, cap):
+                # the battle estimate decides: attackers are added (the best of each province around in turn, as
+                # many directions as possible, within the battle's combat width) until the win chance reaches
+                # GOAL and the fight should be over within QUICK hours, or the CAP; the attack goes when it reaches MIN_WIN (a player sends what stands next to
+                # the province, and more directions widen the battle)
                 for t in targets:
                     ap = lambda d: self.attack_power(d, t)
-                    already = sum(ap(d) for d in under_way[t])
                     room = cap - len(under_way[t])
                     if room <= 0:
                         continue
+                    if under_way[t]:
+                        win, hours = self.odds(t, under_way[t], foes_at[t], True)
+                        if win >= goal and hours <= quick:
+                            continue  # enough on the way
                     pool = []
                     for p in self.nb(t):
                         staying = [d for d in here.get(p, ()) if d.id not in attacking]
@@ -535,13 +575,6 @@ class Planner:
                                        key=ap, reverse=True)
                         exposed = keep_home and any(foe_power[q] > 0 for q in facing.get(p, ()) if q != t)
                         pool += ready[:max(0, len(staying) - 1)] if exposed else ready
-                    pool.sort(key=ap, reverse=True)
-                    # attacked across the worst river among the provinces we attack from
-                    rv = max((m.river(d.province, t) for d in pool), default=0)
-                    need = foe_power[t] * self.terrain(t) * margin * RIVER_ATTACK[rv]
-                    if under_way[t] and already > need * overkill:
-                        continue  # enough on the way
-                    # the best of each province around in turn: as many directions as possible
                     by_src = collections.defaultdict(list)
                     for d in pool:
                         by_src[d.province].append(d)
@@ -551,17 +584,19 @@ class Planner:
                         order += [by_src[p][k] for p in srcs if k < len(by_src[p])]
                     dirs = {d.province for d in under_way[t]}
                     used = sum(self.width(d) for d in under_way[t])
-                    chosen, total = [], already
+                    chosen, win = [], 0.0
                     for d in order:
-                        if (total > need * overkill and chosen) or len(chosen) >= room:
+                        if len(chosen) >= room:
                             break
                         if used + self.width(d) > self.battle_width(t, len(dirs | {d.province})) * s.width_slack:
                             continue  # no room in the battle from here
                         chosen.append(d)
                         dirs.add(d.province)
                         used += self.width(d)
-                        total += ap(d)
-                    if chosen and total > need:
+                        win, hours = self.odds(t, under_way[t] + chosen, foes_at[t], True)
+                        if win >= goal and hours <= quick:
+                            break
+                    if chosen and win >= min_win:
                         under_way[t] += chosen
                         for d in chosen:
                             orders[d.id] = t
@@ -577,8 +612,11 @@ class Planner:
             fast_at = {d.province for d in fast if d.id not in attacking}
             fast_targets = sorted({t for p in fast_at for t in self.nb(p)
                                    if ctrl[t] in hostile and t in fast_route and forward(t)}, key=fast_route.get)
-            attack(fast_targets, self.is_fast, s.fast_margin, s.fast_min_org, False, "fast_attacks", s.fast_cap,
-                   s.fast_overkill)
+            # the tanks are the spearhead: they take on the defended provinces on the way (armour, attack,
+            # breakthrough); motorised and other fast divisions follow and flood the gaps (below). Without tanks
+            # the whole fast army attacks
+            spear = self.is_armored if any(self.is_armored(d) for d in fast) else self.is_fast
+            attack(fast_targets, spear, s.spear_win, s.spear_goal, s.spear_hours, s.fast_min_org, False, "fast_attacks", s.fast_cap)
             # exploitation: a ready fast division not in a fight drives into empty enemy land, each to its own target
             empty = {p for p in enemy_land if foe_power[p] == 0 and forward(p)}
             passable = own | empty
@@ -611,8 +649,9 @@ class Planner:
             # infantry: local attacks where clearly stronger; weak, open, on-route provinces first
             cands = {t for p in front for t in facing[p] if ctrl[t] == target}
             ranked = sorted(cands, key=lambda t: (foe_power[t] + 10) * self.terrain(t) + route.get(t, 99) / 10)
-            attack(ranked, lambda d: not self.is_fast(d), s.attack_margin, s.attack_min_org, True, "attacks",
-                   s.infantry_cap, s.infantry_overkill)
+            attack(ranked, lambda d: not self.is_fast(d), s.infantry_win, s.infantry_goal, s.infantry_hours,
+                   s.attack_min_org,
+                   s.infantry_hold, "attacks", s.infantry_cap)
             # infantry exploitation: once there is empty enemy land (a breach, a pocket emptied), free infantry
             # floods it, nearest first, so the enemy can't close the gap; one division stays on every front province
             # that still faces defenders, and at most a share of the free infantry goes each step (the rest is the
@@ -667,9 +706,7 @@ class Planner:
             if d.id not in attacking and d.moving and d.dest in land and ctrl[d.dest] in hostile:
                 on_target[d.dest].append(d)
         for t, ds in on_target.items():
-            rv = max((m.river(d.province, t) for d in ds), default=0)
-            hopeless = (foe_power[t] > 0 and sum(self.attack_power(d, t) for d in ds)
-                        < foe_power[t] * self.terrain(t) * RIVER_ATTACK[rv])
+            hopeless = foe_power[t] > 0 and self.odds(t, ds, foes_at[t]) < s.stop_win
             for d in ds:
                 if hopeless or self.org_share(d) < s.stop_org:
                     self.stops.append(d)

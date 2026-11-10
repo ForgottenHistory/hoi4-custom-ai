@@ -294,6 +294,14 @@ def main():
             print("template stats:", e)
             return
         planner.set_stats(st)
+        # the enemies' templates too, for the battle estimate (unknown ones count as a plain infantry division)
+        for t in sorted(set(enemies_of(tag)) | {target}):
+            try:
+                foe = templates.country(t, [d for d in divs if d.owner == t], Process())
+            except Exception as e:
+                print("template stats", t + ":", e)
+                continue
+            planner.foe_stats.update({(t, n): x for n, x in foe.items()})
         try:
             planner.widths.update(templates.terrain_widths())
         except OSError as e:
@@ -493,7 +501,8 @@ def main():
                     stats_day = now.date()
                     load_forces(divs, attack_tags(enemies_of(tag)))
             elif now.date() != stats_day and (stats_day is None or any(
-                    d.owner == tag and d.template not in planner.stats for d in divs)):
+                    d.owner == tag and d.template not in planner.stats for d in divs) or any(
+                    d.owner == target and (d.owner, d.template) not in planner.foe_stats for d in divs)):
                 stats_day = now.date()
                 load_stats(divs)
             if army_order and not a.dry_run and now.date() != leader_day:  # once a day: generals and field marshal
