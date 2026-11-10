@@ -1,11 +1,13 @@
 """Maps of recorded wars at the same day of each: who holds what, and where the divisions stand.
 
-    python tools/runmap.py RUN_FOLDER [RUN_FOLDER ...] [--day 15] [--labels You "Game AI" ...] [--out FILE] [--no-open]
+    python tools/runmap.py RUN_FOLDER [RUN_FOLDER ...] [--day 15 [DAY ...]] [--war-start "1939-08-18 17:00"]
+                           [--cols 4] [--gif] [--labels You "Game AI" ...] [--out FILE] [--no-open]
 
-One panel per run (tools/battlerec.py or a controller run), at the snapshot nearest to DAY days after the
-declaration: land taken from the target, the target's land still held, our divisions (fast and infantry
+One panel per run and day (tools/battlerec.py or a controller run), at the snapshot nearest to DAY days after the
+declaration (the run's first step at war, or --war-start when the run began after it): land taken from the target, the target's land still held, our divisions (fast and infantry
 apart, with how many stand in a province) and the target's, and the target's four most valuable victory points
-(names from the game's localisation), or the --cities named. Panels go side by side in one PNG.
+(names from the game's localisation), or the --cities named. Panels go in rows of --cols in one PNG; --gif also
+writes them as an animation.
 """
 import argparse
 import collections
@@ -26,8 +28,8 @@ HOME, TAKEN, HELD = (214, 219, 228), (126, 156, 204), (238, 196, 178)
 FAST, INF, FOE = (24, 48, 112), (70, 110, 180), (178, 34, 34)
 
 
-def snapshot_at(run, day):
-    war = next(s["date"] for s in run.status if s["at_war"] == "1")
+def snapshot_at(run, day, war=None):
+    war = war or next(s["date"] for s in run.status if s["at_war"] == "1")
     t0 = datetime.datetime.strptime(war, FMT)
     want = t0 + datetime.timedelta(days=day)
     date = min(run.steps, key=lambda d: abs(datetime.datetime.strptime(d, FMT) - want))
@@ -37,7 +39,10 @@ def snapshot_at(run, day):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("runs", nargs="+")
-    ap.add_argument("--day", type=float, default=15)
+    ap.add_argument("--day", type=float, nargs="+", default=[15])
+    ap.add_argument("--war-start", help="the declaration (YYYY-MM-DD HH:00) when the run began after it")
+    ap.add_argument("--cols", type=int, default=4)
+    ap.add_argument("--gif", action="store_true", help="also write the panels as an animated GIF")
     ap.add_argument("--labels", nargs="*", default=[])
     ap.add_argument("--cities", nargs="*", default=[], help="victory points to mark (names, any prefix)")
     ap.add_argument("--out")
@@ -53,7 +58,7 @@ def main():
 
     # one crop for all panels: the target's land at the first run's declaration, and a margin
     r0 = runs[0]
-    war0, _, _ = snapshot_at(r0, 0)
+    war0 = next(s["date"] for s in r0.status if s["at_war"] == "1")
     tgt0 = r0.ids[r0.meta["target"]]
     start = r0.control[war0]
     target_land = {p for p, c in start.items() if c == tgt0 and m.is_land(p)}
@@ -74,12 +79,14 @@ def main():
     f_small, f_mid, f_big = font(8 + 2 * scale), font(10 + 2 * scale), font(14 + 3 * scale)
 
     panels = []
-    for run, label in zip(runs, labels):
+    for run, label, day in [(r, lb, dy) for r, lb in zip(runs, labels) for dy in a.day]:
         tag, target = run.meta["tag"], run.meta["target"]
         me, tgt = run.ids[tag], run.ids[target]
-        war, date, at = snapshot_at(run, a.day)
+        war, date, at = snapshot_at(run, day, a.war_start)
+        if len(a.day) > 1:
+            label = f"{label}, day {at:.1f}" if len(runs) > 1 else f"Day {at:.1f}"
         ctrl = run.control[date]
-        first = run.control[war]
+        first = run.control[min(run.control)]
         was_target = {p for p, c in first.items() if c == tgt}
 
         def base(p):
@@ -135,17 +142,19 @@ def main():
                                     f"divisions left"))
 
     head, foot, gap = 56, 40, 12
-    W = sum(p[0].width for p in panels) + gap * (len(panels) + 1)
-    H = panels[0][0].height + head + foot
+    pw, ph = panels[0][0].width, panels[0][0].height
+    cols = max(1, min(a.cols, len(panels)))
+    rows = (len(panels) + cols - 1) // cols
+    W = cols * pw + gap * (cols + 1)
+    H = rows * (ph + head) + foot
     out = Image.new("RGB", (W, H), (250, 250, 248))
     d = ImageDraw.Draw(out)
-    x = gap
-    for img, label, sub in panels:
-        out.paste(img, (x, head))
-        d.text((x, 6), label, fill=(0, 0, 0), font=f_big)
-        d.text((x, 6 + 18 + 3 * scale), sub, fill=(70, 70, 70), font=f_small)
-        x += img.width + gap
-    yy = head + panels[0][0].height + 10
+    for i, (img, label, sub) in enumerate(panels):
+        x, y = gap + (i % cols) * (pw + gap), (i // cols) * (ph + head)
+        out.paste(img, (x, y + head))
+        d.text((x, y + 6), label, fill=(0, 0, 0), font=f_big)
+        d.text((x, y + 6 + 18 + 3 * scale), sub, fill=(70, 70, 70), font=f_small)
+    yy = rows * (ph + head) + 10
     xx = gap
     for kind, col, text in (("box", TAKEN, "taken from Poland"), ("box", HELD, "still Polish"),
                             ("box", HOME, "German"), ("sq", FAST, "German fast divisions"),
@@ -161,10 +170,24 @@ def main():
             d.regular_polygon((xx + 8, yy + 8, 8), 5, fill=col, outline=(0, 0, 0))
         d.text((xx + 22, yy + 8), text, fill=(30, 30, 30), font=f_small, anchor="lm")
         xx += 30 + int(d.textlength(text, font=f_small)) + 18
-    path = os.path.abspath(a.out or os.path.join(REPO, "recordings", "heatmaps", f"runs_day{a.day:g}.png"))
+    days = "-".join(f"{x:g}" for x in a.day) if len(a.day) <= 3 else f"{a.day[0]:g}-{a.day[-1]:g}"
+    path = os.path.abspath(a.out or os.path.join(REPO, "recordings", "heatmaps", f"runs_day{days}.png"))
     os.makedirs(os.path.dirname(path), exist_ok=True)
     out.save(path)
     print(path)
+    if a.gif:
+        frames = []
+        for img, label, sub in panels:
+            fr = Image.new("RGB", (pw + 2 * gap, ph + head + gap), (250, 250, 248))
+            fr.paste(img, (gap, head))
+            fd = ImageDraw.Draw(fr)
+            fd.text((gap, 6), label, fill=(0, 0, 0), font=f_big)
+            fd.text((gap, 6 + 18 + 3 * scale), sub, fill=(70, 70, 70), font=f_small)
+            frames.append(fr)
+        gif = os.path.splitext(path)[0] + ".gif"
+        frames[0].save(gif, save_all=True, append_images=frames[1:], duration=[1200] * (len(frames) - 1) + [3000],
+                       loop=0)
+        print(gif)
     if not a.no_open and sys.platform == "win32":
         os.startfile(path)
 
