@@ -3,9 +3,12 @@
 A recording is a folder:
   meta.json      who recorded what: label, country, target, country ids -> tags, when it started
   status.tsv     per step: date, at war with the target, enemies, target capitulated
-  divisions.tsv  per step: every division of the country and of its enemies (place, destination, org (CArmy
-                 +0x68, not the organisation), strength, supply, army, main unit, template, next province on its
-                 path: 0 if not moving, share: organisation as a share of its maximum)
+  divisions.tsv  per step: every division of the country and of its enemies (place, destination, org:
+                 organisation as a share of its maximum x1000 (100000 = full), strength (100000 = 100%), supply
+                 (not known: always 100000), army, main unit, template, next province on its path: 0 if not moving,
+                 share: org / 100000). meta.json "fields": 2; recordings without it (before 2026-11-10) had other
+                 fields: their strength column is meaningless, supply was the organisation share and share the
+                 strength (tools/compare_runs.py reads both)
   control.tsv    who controls each province: every province at the first step, then only the changes
 Steps are in-game times; the caller decides how often (tools/battlerec.py: every few in-game hours).
 """
@@ -23,7 +26,7 @@ class BattleRecorder:
         self.folder = folder
         meta = os.path.join(folder, "meta.json")
         if not os.path.exists(meta):
-            json.dump({"label": label, "tag": tag, "target": target, "tags": {str(k): v for k, v in tags.items()},
+            json.dump({"label": label, "tag": tag, "target": target, "tags": {str(k): v for k, v in tags.items()}, "fields": 2,
                        "started": datetime.datetime.now().isoformat(timespec="seconds")},
                       open(meta, "w", encoding="utf-8"), indent=1)
         self._status = self._open("status.tsv", "date\tat_war\tenemies\tcapitulated")

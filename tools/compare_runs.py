@@ -52,7 +52,10 @@ class Run:
         self.status = read_tsv(os.path.join(folder, "status.tsv"))
         self.steps = [s["date"] for s in self.status]
         self.divs = collections.defaultdict(list)
+        old = self.meta.get("fields", 1) < 2
         for r in read_tsv(os.path.join(folder, "divisions.tsv")):
+            if old:  # recorded with the wrong fields: supply was the organisation share, share the strength
+                r["org"], r["strength"], r["supply"] = r["supply"], str(int(float(r.get("share") or 1) * 100000)), "100000"
             self.divs[r["date"]].append(r)
         self.control = {}  # date -> {province: controller id} (full, rebuilt from the changes)
         cur = {}

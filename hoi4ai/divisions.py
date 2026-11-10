@@ -4,19 +4,19 @@ import time
 
 from hoi4bridge import send
 
-# CArmy (handle 51) fields: owner, province, destination (0 = none), +0x68 (NOT organisation: 0 for a division
-# at full organisation; kept for the rough power()), strength, template name,
+# CArmy (handle 51) fields: owner, province, destination (0 = none), organisation, strength, template name,
 # main sub-unit sprite (the map counter's: +0x128 -> a CSubUnitDefinition whose key at +0x18 is "---"; its
 # sprite at +0x68 is "infantry" for mountaineers, "light_armor" / "motorized" for those, so it tells fast from
-# slow; the template's battalions are in hoi4ai/templates.py), and +0x490,
-# probably its supply level (100000 = fully supplied; 72727 in a starving 23-division stack, 100000 elsewhere),
-# and the id of the army (or front) it is in, 0 if none (+0xb0 -> its COrdersGroup, id at +0xc), and the path it
-# is moving along ({int province ids} vector at +0x1f0, count +0x1fc: the next province first; battle plans move
-# divisions along it without setting the destination at +0x2a4): its length and next province. Fixed point
-# x1000; strength 100000 = 100%. Last +0x458, probably organisation as a share of the maximum (100000 = full:
-# every rested German and Polish division, while China's and Japan's at war are the lowest; 2026-11-10). The
-# maximum isn't stored: see templates.division_stats "max_org"; organisation as the game shows it = share x that.
-FIELDS = "c1c8 i1e0.a4 i2a4 i68 i30 s3a8.20 s128.68 i490 ib0.c i1fc i1f0.0 i458"
+# slow; the template's battalions are in hoi4ai/templates.py), the id of the army (or front) it is in, 0 if none
+# (+0xb0 -> its COrdersGroup, id at +0xc), and the path it is moving along ({int province ids} vector at +0x1f0,
+# count +0x1fc: the next province first; battle plans move divisions along it without setting the destination at
+# +0x2a4): its length and next province. Fixed point x1000.
+# Organisation +0x490 is a share of the maximum (100000 = full); the maximum isn't stored, see
+# templates.division_stats "max_org" (4 Panzer divisions read 24.9 / 24.9 / 22.8 / 20.8 of 31 against the game's
+# 25 / 25 / 23 / 22). Strength +0x458 is the equipment share (100000 = 100%: 96322 for a division at 96%).
+# Supply isn't known yet: every division counts as fully supplied. (Before 2026-11-10 +0x490 was read as supply,
+# +0x30 as strength and +0x68 as organisation: none of them is.)
+FIELDS = "c1c8 i1e0.a4 i2a4 i490 i458 s3a8.20 s128.68 ib0.c i1fc i1f0.0"
 
 
 class Division:
@@ -24,11 +24,11 @@ class Division:
                  "next", "share")
 
     def __init__(self, did, owner, province, dest, org, strength, template, unit="", supply=100000, army=0, path=0,
-                 nxt=0, share=100000):
+                 nxt=0):
         self.id, self.owner, self.province, self.dest = did, owner, province, dest
         self.org, self.strength, self.template, self.unit, self.supply = org, strength, template, unit, supply
         self.army = army
-        self.share = min(1.0, max(0.0, share / 100000))  # organisation as a share of its maximum
+        self.share = min(1.0, max(0.0, org / 100000))  # organisation as a share of its maximum (org is that x1000)
         self.path, self.next = path, nxt if path else 0  # the next province, 0 when not moving
 
     @property
@@ -36,7 +36,7 @@ class Division:
         return self.dest not in (0, self.province)
 
     def __repr__(self):
-        return "Div(%d %s @%d->%d org %.1f str %.0f%% %s [%s])" % (
+        return "Div(%d %s @%d->%d org %.0f%% str %.0f%% %s [%s])" % (
             self.id, self.owner, self.province, self.dest, self.org / 1000, self.strength / 1000, self.template,
             self.unit)
 
@@ -71,10 +71,9 @@ class Snapshotter:
                     continue
                 try:  # by id: a snapshot written twice (another client switching the snapshot file) counts once
                     out[int(p[0])] = Division(int(p[0]), p[1], int(p[2]), int(p[3]), int(p[4]), int(p[5]), p[6],
-                                              p[7] if len(p) > 7 else "", int(p[8]) if len(p) > 8 else 100000,
-                                              int(p[9]) if len(p) > 9 and p[9].lstrip("-").isdigit() else 0,
-                                              int(p[10]) if len(p) > 11 else 0, int(p[11]) if len(p) > 11 else 0,
-                                              int(p[12]) if len(p) > 12 else 100000)
+                                              p[7] if len(p) > 7 else "", 100000,
+                                              int(p[8]) if len(p) > 8 and p[8].lstrip("-").isdigit() else 0,
+                                              int(p[9]) if len(p) > 10 else 0, int(p[10]) if len(p) > 10 else 0)
                 except ValueError:
                     continue
         # strength 0 and org 0: at sea or deploying, not on the map
