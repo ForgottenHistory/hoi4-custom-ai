@@ -8,9 +8,9 @@
 - An attack counts only the divisions that fit the battle's combat width (the terrain's, widened for every extra
   province attacked from) and takes its attackers from the provinces around in turn: two divisions from two sides
   fight better than two from one.
-- Infantry holds the line: one division on every province facing the enemy. Half the rest stands behind the
-  fast army to follow and widen its breach, the other half at a few support points along good routes; reserves
-  fill nearby front provinces before going deep. Infantry attacks locally where it clearly outweighs the
+- Infantry is split evenly over the whole front (a player's rule): every province facing the enemy gets the same
+  number, up to max_stack, the main front and the strongest enemy first for the remainder. Only what is left once
+  the front is full stands behind the fast army. Infantry attacks locally where it clearly outweighs the
   defenders.
 - Fast divisions (armour, motorised: see units.py) form one breakthrough army. Before the war it deploys at the
   start of the best route to the enemy's heart; at war it attacks along that route and keeps going (exploits),
@@ -30,7 +30,7 @@
   (a bigger one pulls harder: a route ends where the cost plus OBJECTIVE_BASE / (1 + victory points / 5) is
   lowest). The fast army and the infantry reserves follow the main axis.
 - Supply: every province draws on its nearest supply hub by land. An area's limit is learned from its divisions:
-  short of supply, about divisions x their supply share; fully supplied at the limit, one more each step.
+  below half supply on average, about divisions x their supply share; fully supplied at the limit, one more each step.
   Points, reserves and leftovers go only where there is room; divisions in an overloaded area (resting tanks
   too) move to the nearest area with room.
 
@@ -83,9 +83,6 @@ class Settings:
     fast_cutoff = 6.0          # ... and a point pulls nothing beyond this many fast_reach (e^-6)
     fast_objectives = 150      # at most this many points pull the fast army (the most valuable)
     fast_foe_weight = 2.0      # fast army: defenders count this much more on its routes (tanks go around strength)
-    support_every = 10         # one infantry support point per this many reserve infantry divisions
-    max_support = 4
-    support_route = 1.2        # support points only on routes at most this much dearer than the best
     max_stack = 6              # divisions per province we plan for (more starve: supply, attrition)
     spill_reach = 8            # divisions left over when every post is full go to a front province this close
     axis_tie = 1.15            # fast army starts within this much of the best route compete on how they split the enemy
@@ -95,7 +92,8 @@ class Settings:
     exploit_reach = 8          # fast divisions drive this many provinces deep into empty enemy land
     hub_value = 3.0            # a supply hub is worth this many victory points (per hub level)
     rail_value = 0.5           # a railway province, per railway level
-    supply_short = 0.9         # a supply area whose divisions average below this share of supply is overloaded
+    supply_short = 0.5         # a supply area whose divisions average below this share of supply is overloaded
+                               # (a player's rule: under 50% is bad, a bit short is fine)
     supply_floor = 2           # a supply area's learned limit never goes below this many divisions
 
 
@@ -444,14 +442,25 @@ class Planner:
             fscore = {p: v for p, v in fscore.items() if v < math.inf}
             body_front = set(fscore) or set(score)  # where reserves may spread along the line
             n_line, n_fast = line_in[c], fast_in[c]
-            # infantry holds the line; if short, where the enemy is strongest, the main front first
-            if n_line < len(fr):
-                ranked = sorted(fr, key=lambda p: (p in main, sum(foe_power[q] for q in facing[p])), reverse=True)
-                line_demand.update({p: 1 for p in ranked[:n_line]})
-                reserves = 0
-            else:
-                line_demand.update({p: 1 for p in fr})
-                reserves = n_line - len(fr)
+            # infantry is split evenly over the whole front: one division a province per round (the main front and
+            # where the enemy is strongest first), up to max_stack and only where supply has room. What is left
+            # once every front province is full stands behind the fast army
+            ranked = sorted(fr, key=lambda p: (p in main, sum(foe_power[q] for q in facing[p])), reverse=True)
+            aload = self.area_load(line_demand)
+            reserves = n_line
+            while reserves:
+                took = 0
+                for p in ranked:
+                    if not reserves:
+                        break
+                    if line_demand.get(p, 0) >= s.max_stack or self.room(aload, p) < 1:
+                        continue
+                    line_demand[p] = line_demand.get(p, 0) + 1
+                    aload[self.area(p)] += 1
+                    reserves -= 1
+                    took += 1
+                if not took:
+                    break
             if not score:
                 continue
             # the fast army: one sector, at the start of the best route into the enemy's main body. At war, where
@@ -471,44 +480,20 @@ class Planner:
                 best = max(near, key=lambda p: (self.split(p, goal, foe_power, target_land), -fcand[p]))
                 self.points[best] = ("fast", s.keep)
                 fpts = [best]
-            used = set()
-            load = dict(line_demand)  # holders already stand there
+            # the fast army stacks on top of the infantry line: max_stack counts fast divisions only
+            fload = {}
             for b in fpts:
-                placed = self.place(b, math.ceil(n_fast / len(fpts)), fcand, own, load, fast_demand, body_front)
+                placed = self.place(b, math.ceil(n_fast / len(fpts)), fcand, own, fload, fast_demand, body_front)
                 sectors[b] = ("fast", placed)
-                used.update(self.sector(b, fcand))
-            # infantry support points: along the next best routes of the main axis, apart from each other and
-            # from the fast sector
-            score = fscore or score
-            spts = [p for p, (k, _) in self.points.items() if k == "support" and comp.get(p) == c]
-            for b in spts:
-                used.update(self.sector(b, score))
-            want = min(s.max_support, reserves // s.support_every)
-            best_route = min(score.values())
-            for p in sorted(score, key=score.get):
-                if score[p] > best_route * s.support_route:
-                    break
-                if len(spts) >= want:
-                    break
-                sec = self.sector(p, score)
-                if p in self.points or any(q in used or any(n in used for n in self.nb(q)) for q in sec):
-                    continue
-                self.points[p] = ("support", s.keep)
-                spts.append(p)
-                used.update(sec)
-            # half the reserve infantry backs the fast army (its shoulders: to follow and widen the breach), the
-            # rest goes to the support points (or also to the fast army if there are none)
-            behind = reserves if not spts else (reserves // 2 if fpts else 0)
-            if fpts and behind:
-                per = math.ceil(behind / len(fpts))
-                for b in fpts:
-                    placed = self.place(b, per, fcand, own, load, line_demand, body_front)
-                    sectors[b] = ("fast", sorted(set(sectors[b][1]) | set(placed)))
-            if spts and reserves - behind:
-                per = math.ceil((reserves - behind) / len(spts))
-                for b in spts:
-                    placed = self.place(b, per, score, own, load, line_demand, body_front)
-                    sectors.setdefault(b, ("support", placed))
+            # infantry left over when the whole front is full backs the fast army (to follow and widen the breach)
+            if reserves:
+                load = dict(line_demand)
+                pts = fpts or [min(score, key=score.get)]
+                per = math.ceil(reserves / len(pts))
+                for b in pts:
+                    placed = self.place(b, per, fcand if fpts else score, own, load, line_demand, body_front)
+                    sectors[b] = (sectors.get(b, ("support", []))[0],
+                                  sorted(set(sectors.get(b, ("", []))[1]) | set(placed)))
 
         self.view = dict(front=front, main=main, goal=goal, foe_power=dict(foe_power), component=comp,
                          route=fast_route, near_route=route, fast_route=fast_route, objectives=vps, body=body,
@@ -713,7 +698,8 @@ class Planner:
                       support_points=sum(1 for k, _ in self.points.values() if k == "support"),
                       unposted=unposted, enemy_power=round(sum(foe_power.values()), 1),
                       our_power=round(sum(power(d) for d in mine), 1), goal=goal or 0,
-                      short_of_supply=sum(1 for d in mine if getattr(d, "supply", 100000) < 95000),
+                      short_of_supply=sum(1 for d in mine
+                                          if getattr(d, "supply", 100000) < s.supply_short * 100000),
                       max_stack=max(collections.Counter(d.province for d in mine).values(), default=0),
                       overloaded=sum(1 for a, c in self.supply_cap.items() if in_area[a] > c),
                       over_supply=round(sum(max(0, in_area[a] - c) for a, c in self.supply_cap.items())))

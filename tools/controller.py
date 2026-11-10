@@ -1,6 +1,6 @@
 """Run a country's army with our own planner (hoi4ai/front.py) instead of the game's AI.
 
-    python tools/controller.py --tag GER --target POL [--hours 4] [--dry-run] [--no-takeover]
+    python tools/controller.py --tag GER --target POL [--hours 4] [--dry-run] [--no-takeover] [--leave ARMY ...]
     python tools/controller.py --tag POL --target GER --defend
 
 Start a new game, `observe` (or play another country), pause, then run this. It takes the country's army away
@@ -255,6 +255,9 @@ def main():
                          "then moves those armies and the controller only the rest")
     ap.add_argument("--armies", action="store_true",
                     help="let the game form armies and pick generals (their buffs); fronts and plans stay blocked")
+    ap.add_argument("--leave", type=int, nargs="+", default=[], metavar="ARMY",
+                    help="armies left to the player (e.g. one guarding another border): never moved, organized or "
+                         "planned for")
     ap.add_argument("--no-takeover", action="store_true", help="don't block the game AI's army commands")
     ap.add_argument("--no-record", action="store_true", help="don't record the war (hoi4ai/battlerec.py)")
     ap.add_argument("--defend", action="store_true", help="TAG defends against TARGET (hoi4ai/defend.py)")
@@ -272,6 +275,11 @@ def main():
     me, tgt = ids[tag], ids[target]
     provinces = Provinces()
     snap = Snapshotter(os.path.join(REPO, ".cache", "controller_snap.tsv"))
+    leave = set(a.leave)
+
+    def take():
+        """Every division, less those of the armies left to the player (--leave)."""
+        return [d for d in snap.take() if not (d.owner == tag and d.army in leave)]
     unit_types = units.load()
     fast_units = {n for n, u in unit_types.items() if u.fast}
     planner = Planner(m, me, fast_units, armored_units={n for n, u in unit_types.items() if u.armored})
@@ -344,14 +352,14 @@ def main():
     if a.organize and not a.dry_run:
         provinces.refresh()
         friend_ids0 = [ids[t] for t in friends_of(tag) if t in ids]
-        lines, group_id, group_armies, membership = build_structure(m, provinces, snap.take(), tag, me, tgt,
+        lines, group_id, group_armies, membership = build_structure(m, provinces, take(), tag, me, tgt,
                                                                     fast_units, friend_ids0, os.path.join(REPO, ".cache"))
         for line in lines:
             print("  " + line)
     elif a.group and len(a.group) > 1:
         group_id, group_armies = a.group[0], a.group[1:]
         # after a restart: keep each division of these armies in the army it is in now
-        membership = {d.id: d.army for d in snap.take() if d.owner == tag and d.army in group_armies}
+        membership = {d.id: d.army for d in take() if d.owner == tag and d.army in group_armies}
     else:
         group_id, group_armies, membership = 0, [], {}
     army_order = list(dict.fromkeys(membership.values()))  # creation order: the fast army first
@@ -384,7 +392,7 @@ def main():
     if a.plans and group_armies and not a.dry_run and not planned:
         from hoi4ai.memory import Process
         provinces.refresh()
-        divs0 = snap.take()
+        divs0 = take()
         # every army that stands at the border (the fast one too); a restart redraws the plans
         planning = sorted({d.army for d in divs0 if d.owner == tag and d.army})
         proc = Process()
@@ -473,7 +481,7 @@ def main():
                     print("army group, put back:", r)
             try:
                 provinces.refresh()
-                divs = snap.take()
+                divs = take()
             except (OSError, BridgeError, BridgeUnavailable) as e:
                 print("snapshot:", e)
                 last = None
