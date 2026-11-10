@@ -1,11 +1,11 @@
 """Record a war while you (or the game's AI) fight it, for tools/compare_runs.py.
 
-    python tools/battlerec.py --label player [--tag GER] [--target POL] [--hours 4] [--no-cmdrec]
+    python tools/battlerec.py --label player [--tag GER] [--target POL] [--hours 4] [--war-days 183] [--no-cmdrec]
 
 Start the game (play the country, or `observe` to let the game's AI fight), then run this. Every --hours in-game
 hours it writes every division of the country and its enemies and who controls each province
 (hoi4ai/battlerec.py), and every command the game executes (bridge.cmdrec, with the date stamped in). It stops a
-step after the target capitulates, or with Ctrl+C. Our own controller records the same way by itself.
+step after the target capitulates, --war-days after the declaration, or with Ctrl+C. Our own controller records the same way by itself.
 
 Recordings go to recordings/battle_<label>_<TAG>_<time>/.
 """
@@ -29,6 +29,8 @@ def main():
     ap.add_argument("--target", default="POL")
     ap.add_argument("--hours", type=int, default=4, help="in-game hours between snapshots")
     ap.add_argument("--no-cmdrec", action="store_true", help="don't record commands")
+    ap.add_argument("--war-days", type=float, default=0,
+                    help="stop this many in-game days after the war with TARGET began (0: when it capitulates)")
     a = ap.parse_args()
     tag, target = a.tag.upper(), a.target.upper()
     tags, ids = country_ids()
@@ -40,7 +42,7 @@ def main():
     provinces = Provinces()
     snap = Snapshotter(os.path.join(REPO, ".cache", "battlerec_snap.tsv"))
     print(f"recording {tag} against {target} every {a.hours} in-game hours into {folder} (Ctrl+C stops)")
-    last, done = None, False
+    last, done, war_start = None, False, None
     try:
         while not done:
             try:
@@ -70,6 +72,11 @@ def main():
             taken = int(((provinces.owner == ids[target]) & (provinces.controller == ids[tag])).sum())
             print(f"{now:%Y-%m-%d %H:00} war={int(at_war)} divisions={len(divs)} taken={taken}")
             done = capitulated
+            if at_war and war_start is None:
+                war_start = now
+            if a.war_days and war_start and (now - war_start).total_seconds() / 86400 >= a.war_days:
+                print(f"stopping: {a.war_days:g} days after the war began ({war_start:%Y-%m-%d %H:00})")
+                done = True
     except KeyboardInterrupt:
         print()
     finally:
