@@ -261,9 +261,9 @@ def main():
     ap.add_argument("--no-takeover", action="store_true", help="don't block the game AI's army commands")
     ap.add_argument("--no-record", action="store_true", help="don't record the war (hoi4ai/battlerec.py)")
     ap.add_argument("--defend", action="store_true", help="TAG defends against TARGET (hoi4ai/defend.py)")
-    ap.add_argument("--no-hold", action="store_true",
-                    help="don't pause the game while planning (bridge.pause): at high speed the game then runs on, "
-                         "and divisions that arrive wait for the next plan")
+    ap.add_argument("--hold", action="store_true",
+                    help="pause the game while planning (bridge.pause): every plan lands on time whatever the game "
+                         "speed; for exact comparisons between runs, not normal play")
     a = ap.parse_args()
     if a.defend and (a.organize or a.plans or a.group):
         raise SystemExit("--defend runs without --organize, --plans or --group")
@@ -475,7 +475,7 @@ def main():
 
     def hold():
         nonlocal held
-        if a.no_hold or a.dry_run:
+        if not a.hold or a.dry_run:
             return
         r = send("bridge.pause")[0]
         if r == "OK running":

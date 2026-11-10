@@ -202,21 +202,45 @@ class Planner:
                     q.append(n)
         return dist
 
-    def waypoint(self, start, goal, passable, k=3):
+    def waypoint(self, start, goal, passable, margin=2):
         """Where to send a division from START to GOAL so it goes around what isn't PASSABLE (the game paths the
-        shortest way, through enemy-held land): K steps along the shortest route through PASSABLE (GOAL itself if
-        that close), or None if there is no such route."""
+        shortest way, through enemy-held land): the farthest province along the shortest route through PASSABLE
+        that no way through other land reaches in fewer than MARGIN more steps (the game weighs terrain, not
+        steps), so the game keeps the division moving between plans; GOAL itself when the whole route is safe,
+        None if there is no such route."""
         if start == goal:
             return goal
-        dist = self.bfs([goal], set(passable) | {start, goal})
+        passable = set(passable) | {start, goal}
+        dist = self.bfs([goal], passable)
         if start not in dist:
             return None
-        p = start
-        for _ in range(k):
-            if p == goal:
+        route = [start]
+        while route[-1] != goal:
+            p = route[-1]
+            route.append(min((n for n in self.nb(p) if n in dist and dist[n] < dist[p]), key=dist.get))
+        # steps from START to each province by a way that leaves PASSABLE at least once (states: province, left yet)
+        limit = len(route) + margin
+        seen = {(start, False): 0}
+        q = collections.deque([(start, False)])
+        bad = {}
+        while q:
+            p, left = q.popleft()
+            k = seen[(p, left)]
+            if k >= limit:
+                continue
+            for n in self.nb(p):
+                st = (n, left or n not in passable)
+                if st not in seen:
+                    seen[st] = k + 1
+                    if st[1]:
+                        bad.setdefault(n, k + 1)
+                    q.append(st)
+        best = route[1]
+        for steps, p in enumerate(route[1:], 1):
+            if bad.get(p, math.inf) <= steps + margin - 1:
                 break
-            p = min((n for n in self.nb(p) if n in dist and dist[n] < dist[p]), key=dist.get)
-        return p
+            best = p
+        return best
 
     def set_stats(self, stats):
         """STATS: {template name: {"soft_attack", "maximum_speed", "terrain": {terrain: {"attack": modifier}}}}
