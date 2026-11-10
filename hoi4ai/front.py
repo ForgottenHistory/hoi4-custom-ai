@@ -82,10 +82,12 @@ class Settings:
     # can fit in the battle, fresh divisions replacing the worn-out ones; the ring around it stays held
     pocket_max = 12
     pocket_cap = 12            # infantry divisions sent at one pocket province
-    # an attack that costs neither side strength or organisation for this many planning steps isn't being
-    # fought (the game kept the order but started no battle): it is called off and the divisions leave that
-    # province alone for stall_rest steps, so others are sent
-    stall_steps = 6
+    # an attack on a pocket that costs neither side strength or organisation for this many planning steps isn't
+    # being fought (the game kept the order but started no battle): it is called off and the divisions leave
+    # that province alone for stall_rest steps, so others are sent. Pockets only, and slow: the strength and
+    # organisation we read change rarely (Polish strength not at all in the first days), so on the open front
+    # a working attack looks the same
+    stall_steps = 12
     stall_rest = 3
     infantry_reach = 4         # infantry drives into empty enemy land up to this many provinces away
     infantry_drive_share = 0.5  # share of the free infantry that may start a drive each step
@@ -131,7 +133,7 @@ class Planner:
         self.hold = {}              # division id -> province it holds / stages at
         self.points = {}            # province -> (kind 'fast' | 'support', steps left)
         self.drive = {}             # fast division id -> the empty enemy province it drives to
-        self.watch = {}             # attacking division id -> (target, step of last loss, strength, share, {defender id: strength})
+        self.watch = {}             # attacking division id -> (target, step of last loss, strength, share, {defender id: (strength, share)})
         self.cool = {}              # division id -> (province it gave up attacking, step it may again)
         self.tick = 0
         self.view = {}
@@ -576,17 +578,21 @@ class Planner:
                 if d.moving and d.dest in land and ctrl[d.dest] in hostile:
                     under_way[d.dest].append(d)
 
-            # stalled attacks: next to the target, and neither we nor any defender lost anything for stall_steps steps
+            # stalled pocket attacks: next to the target, and neither we nor any defender lost strength or
+            # organisation for stall_steps steps
             # (each defender on its own: fresh ones joining must not hide that the others stopped losing)
             watch = {}
             for t, ds in list(under_way.items()):
-                foes = {f.id: f.strength for f in foes_at[t]}
+                if t not in pockets:
+                    continue
+                foes = {f.id: (f.strength, getattr(f, "share", 1.0)) for f in foes_at[t]}
                 for d in list(ds):
                     if t not in self.nb(d.province) or not foes_at[t]:
                         continue  # still on the way, or nobody to fight
                     w = self.watch.get(d.id)
                     lost = w is None or w[0] != t or d.strength < w[2] or d.share < w[3] - 0.005 or any(
-                        foes.get(f, 0) < st - 200 for f, st in w[4].items())
+                        f not in foes or foes[f][0] < st - 200 or foes[f][1] < sh - 0.005
+                        for f, (st, sh) in w[4].items())
                     since = self.tick if lost else w[1]
                     watch[d.id] = (t, since, d.strength, d.share, foes)
                     if self.tick - since >= s.stall_steps:
