@@ -60,8 +60,8 @@ OBJECTIVE_BASE = 8.0  # power (organisation x strength) of a fresh 1939 infantry
 
 
 def power(d):
-    """Fighting power of a division: organisation x strength (both as the game shows them)."""
-    return (d.org / 1000.0) * (d.strength / 100000.0)
+    """Fighting power of a division: its share of organisation x strength, FULL_DIVISION when full."""
+    return FULL_DIVISION * getattr(d, "share", 1.0) * (d.strength / 100000.0)
 
 
 class Settings:
@@ -77,6 +77,16 @@ class Settings:
     spear_goal = 0.9
     spear_hours = 24
     stop_win = 0.3             # attacks under way are called off below this chance
+    # pockets: a piece of the target's land cut off from its main body, this many provinces or fewer. Its
+    # defenders get no supply and die when it falls, so the infantry attacks it whatever the odds, with all it
+    # can fit in the battle, fresh divisions replacing the worn-out ones; the ring around it stays held
+    pocket_max = 12
+    pocket_cap = 12            # infantry divisions sent at one pocket province
+    # an attack that costs neither side strength or organisation for this many planning steps isn't being
+    # fought (the game kept the order but started no battle): it is called off and the divisions leave that
+    # province alone for stall_rest steps, so others are sent
+    stall_steps = 6
+    stall_rest = 3
     infantry_reach = 4         # infantry drives into empty enemy land up to this many provinces away
     infantry_drive_share = 0.5  # share of the free infantry that may start a drive each step
     armor_factor = 1.8         # an armoured division (main unit in the armor group) counts this much more when it
@@ -121,6 +131,8 @@ class Planner:
         self.hold = {}              # division id -> province it holds / stages at
         self.points = {}            # province -> (kind 'fast' | 'support', steps left)
         self.drive = {}             # fast division id -> the empty enemy province it drives to
+        self.watch = {}             # attacking division id -> (target, step of last loss, strength, share, {defender id: strength})
+        self.cool = {}              # division id -> (province it gave up attacking, step it may again)
         self.tick = 0
         self.view = {}
         self.supply_cap = {}        # supply area (its hub province) -> divisions it can supply (learned)
@@ -543,6 +555,13 @@ class Planner:
 
         orders, attacking = {}, set()
         report = collections.Counter()
+        self.stops = []
+        pockets = set()
+        for p in target_land - body:
+            if p not in pockets:
+                piece = set(self.bfs([p], target_land))
+                if len(piece) <= s.pocket_max:
+                    pockets |= piece
         if at_war and target in enemies:
             here = collections.defaultdict(list)
             for d in mine:
@@ -556,6 +575,29 @@ class Planner:
             for d in mine:
                 if d.moving and d.dest in land and ctrl[d.dest] in hostile:
                     under_way[d.dest].append(d)
+
+            # stalled attacks: next to the target, and neither we nor any defender lost anything for stall_steps steps
+            # (each defender on its own: fresh ones joining must not hide that the others stopped losing)
+            watch = {}
+            for t, ds in list(under_way.items()):
+                foes = {f.id: f.strength for f in foes_at[t]}
+                for d in list(ds):
+                    if t not in self.nb(d.province) or not foes_at[t]:
+                        continue  # still on the way, or nobody to fight
+                    w = self.watch.get(d.id)
+                    lost = w is None or w[0] != t or d.strength < w[2] or d.share < w[3] - 0.005 or any(
+                        foes.get(f, 0) < st - 200 for f, st in w[4].items())
+                    since = self.tick if lost else w[1]
+                    watch[d.id] = (t, since, d.strength, d.share, foes)
+                    if self.tick - since >= s.stall_steps:
+                        ds.remove(d)
+                        self.stops.append(d)
+                        attacking.add(d.id)
+                        self.cool[d.id] = (t, self.tick + s.stall_rest)
+                        watch.pop(d.id)
+                        report["stalled"] += 1
+            self.watch = watch
+            self.cool = {k: v for k, v in self.cool.items() if v[1] > self.tick}
 
             def attack(targets, eligible, min_win, goal, quick, min_org, keep_home, label, cap):
                 # the battle estimate decides: attackers are added (the best of each province around in turn, as
@@ -574,7 +616,8 @@ class Planner:
                     pool = []
                     for p in self.nb(t):
                         staying = [d for d in here.get(p, ()) if d.id not in attacking]
-                        ready = sorted((d for d in staying if eligible(d) and self.can_attack(d, min_org)),
+                        ready = sorted((d for d in staying if eligible(d) and self.can_attack(d, min_org)
+                                        and self.cool.get(d.id, (None,))[0] != t),
                                        key=ap, reverse=True)
                         exposed = keep_home and any(foe_power[q] > 0 for q in facing.get(p, ()) if q != t)
                         pool += ready[:max(0, len(staying) - 1)] if exposed else ready
@@ -649,8 +692,13 @@ class Planner:
                 orders[d.id] = t
                 attacking.add(d.id)
                 report["drives"] += 1
+            # pockets first: everything that fits, whatever the odds, the weakest defenders first
+            in_pocket = sorted({t for p in front for t in facing[p] if t in pockets and foe_power[t] > 0},
+                               key=lambda t: foe_power[t])
+            attack(in_pocket, lambda d: not self.is_fast(d), 0.0, 2.0, 0, s.attack_min_org, True, "pocket_attacks",
+                   s.pocket_cap)
             # infantry: local attacks where clearly stronger; weak, open, on-route provinces first
-            cands = {t for p in front for t in facing[p] if ctrl[t] == target}
+            cands = {t for p in front for t in facing[p] if ctrl[t] == target and t not in pockets}
             ranked = sorted(cands, key=lambda t: (foe_power[t] + 10) * self.terrain(t) + route.get(t, 99) / 10)
             attack(ranked, lambda d: not self.is_fast(d), s.infantry_win, s.infantry_goal, s.infantry_hours,
                    s.attack_min_org,
@@ -703,13 +751,12 @@ class Planner:
                     report["infantry_drives"] += 1
 
         # stop attacks: a worn-out attacker, or everyone on a province we no longer outweigh (a player's micro)
-        self.stops = []
         on_target = collections.defaultdict(list)
         for d in mine:
             if d.id not in attacking and d.moving and d.dest in land and ctrl[d.dest] in hostile:
                 on_target[d.dest].append(d)
         for t, ds in on_target.items():
-            hopeless = foe_power[t] > 0 and self.odds(t, ds, foes_at[t]) < s.stop_win
+            hopeless = foe_power[t] > 0 and t not in pockets and self.odds(t, ds, foes_at[t]) < s.stop_win
             for d in ds:
                 if hopeless or self.org_share(d) < s.stop_org:
                     self.stops.append(d)
