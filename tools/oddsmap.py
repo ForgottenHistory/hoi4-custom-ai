@@ -61,8 +61,8 @@ def main():
 
     def member(d, rested=False):
         st = stats.get((d.owner, d.template), battle.DEFAULT)
-        full = st.get("max_org", 0) * 1000 or d.org
-        return (st, max(d.org, full) if rested else d.org, full, d.strength / 100000)
+        full = st.get("max_org", 0) * 1000 or (d.org / d.share if d.share else d.org)
+        return (st, full if rested else d.share * full, full, d.strength / 100000)
 
     at = {}
     for d in divs:

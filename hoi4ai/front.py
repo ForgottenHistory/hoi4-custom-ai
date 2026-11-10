@@ -117,8 +117,6 @@ class Planner:
         self.fast_units = set(fast_units)
         self.armored_units = set(armored_units)
         self.s = settings or Settings()
-        self.best_org = {}          # division id -> highest org seen
-        self.template_org = {}      # template name -> highest org seen on any division of it
         self.hold = {}              # division id -> province it holds / stages at
         self.points = {}            # province -> (kind 'fast' | 'support', steps left)
         self.drive = {}             # fast division id -> the empty enemy province it drives to
@@ -237,8 +235,10 @@ class Planner:
     def member(self, d, foe=False):
         """D as a battle.fight member: its template's stats, organisation, best organisation, strength share."""
         st = self.foe_stats.get((d.owner, d.template)) if foe else self.stats.get(d.template)
-        best = (st or {}).get("max_org", 0) * 1000 or (0 if foe else self.max_org(d))
-        return (st or battle.DEFAULT, d.org, best, d.strength / 100000)
+        best = (st or {}).get("max_org", 0) * 1000
+        if not best:  # template unknown: the raw values (same scale, so the share is right)
+            return (st or battle.DEFAULT, d.org, d.org / d.share if d.share else d.org, d.strength / 100000)
+        return (st, d.share * best, best, d.strength / 100000)
 
     def odds(self, t, attackers, defenders, with_hours=False):
         """Estimated chance ATTACKERS (ours, standing next to T) beat DEFENDERS (in T); with WITH_HOURS also how
@@ -277,23 +277,17 @@ class Planner:
     def is_fast(self, d):
         return getattr(d, "unit", None) in self.fast_units
 
-    def max_org(self, d):
-        """A division's maximum organisation (x1000): its template's (templates.division_stats) when known, else
-        the best seen on it or any division of its template (so one first seen worn out doesn't count as fresh)."""
-        self.best_org[d.id] = max(self.best_org.get(d.id, 0), d.org)
-        self.template_org[d.template] = max(self.template_org.get(d.template, 0), d.org)
-        t = self.stats.get(d.template)
-        if t and t.get("max_org"):
-            return t["max_org"] * 1000
-        return max(self.best_org[d.id], self.template_org[d.template])
-
     def org_share(self, d):
         """Organisation as a share of its maximum."""
-        best = self.max_org(d)
-        return min(1.0, d.org / best) if best else 0.0
+        return d.share
+
+    def org_now(self, d):
+        """Organisation as the game shows it (x1000): the share of its template's maximum."""
+        t = self.stats.get(d.template)
+        return d.share * t["max_org"] * 1000 if t and t.get("max_org") else d.org
 
     def can_attack(self, d, min_share):
-        return d.org >= self.s.attack_floor and self.org_share(d) >= min_share
+        return self.org_now(d) >= self.s.attack_floor and self.org_share(d) >= min_share
 
     def terrain(self, p):
         return TERRAIN_COST.get(self.m.provinces[p].terrain, 2.0)
