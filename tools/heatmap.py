@@ -8,6 +8,8 @@ Runs one planning step on the live game (sends nothing) and draws two panels aro
           sector is ringed purple with the way it would push; infantry support points are ringed black.
   forces: infantry+fast divisions per province (green; purple where fast divisions stand), enemy strength
           (red, organisation x strength).
+  supply: each supply area (provinces nearest a hub) by our divisions there against the limit learned from
+          their supply this step (green fine, orange to red overloaded); hubs labelled "divisions/limit supply".
 """
 import argparse
 import datetime
@@ -181,11 +183,61 @@ def main():
     for p, f in foe.items():
         d2.text(xy(p), "%.0f" % f, fill=(255, 255, 255) if f / fmax > 0.4 else (80, 0, 0), font=f_small, anchor="mm")
 
+    # panel 3: supply. Each supply area (the provinces nearest a hub) by how loaded it is: our divisions there
+    # against the limit learned from their supply (green: fine or never short; orange to dark red: overloaded).
+    # Hubs are squares labelled "divisions/limit"; thick lines are area borders.
+    in_area, sup = {}, {}
+    for d in divs:
+        if d.owner == tag and m.is_land(d.province):
+            a_ = pl.area(d.province)
+            in_area[a_] = in_area.get(a_, 0) + 1
+            sup.setdefault(a_, []).append(min(1.0, d.supply / 100000))
+    cap = pl.supply_cap
+    OK = (170, 215, 160)
+
+    def area_colour(a_):
+        n, c = in_area.get(a_, 0), cap.get(a_)
+        if not n:
+            return None
+        if c is None or n <= c:
+            return OK
+        return ramp(HOT, min(1.0, (n / c - 1) / 1.5))
+    col3 = {}
+    for p in m.provinces:
+        if m.is_land(p) and ctrl[p] in ours:
+            c = area_colour(pl.area(p))
+            if c:
+                col3[p] = c
+    img3 = panel(ids, (y0, y1, x0, x1), scale, col3, base)
+    sub = ids[y0:y1, x0:x1]
+    uniq, inv = np.unique(sub, return_inverse=True)
+    amap = np.array([pl.area(int(u)) if m.is_land(int(u)) else -1 for u in uniq])[inv.reshape(sub.shape)]
+    aedge = np.zeros(sub.shape, bool)
+    aedge[:, 1:] |= amap[:, 1:] != amap[:, :-1]
+    aedge[1:, :] |= amap[1:, :] != amap[:-1, :]
+    aedge = np.kron(aedge, np.ones((scale, scale), bool))
+    arr = np.array(img3)
+    arr[aedge] = (60, 60, 60)
+    img3 = Image.fromarray(arr, "RGB")
+    d3 = ImageDraw.Draw(img3)
+    for a_, n in in_area.items():
+        if a_ not in m.provinces or not (x0 <= m.provinces[a_].x < x1 and y0 <= m.provinces[a_].y < y1):
+            continue
+        x, y = xy(a_)
+        r = 3 * scale
+        d3.rectangle((x - r, y - r, x + r, y + r), fill=(30, 30, 30))
+        c = cap.get(a_)
+        s_ = sup[a_]
+        label = f"{n}/{c:.0f} {sum(s_) / len(s_):.0%}" if c is not None else f"{n} {sum(s_) / len(s_):.0%}"
+        d3.text((x, y + 6 * scale), label, fill=(0, 0, 0), font=f_small, anchor="mt",
+                stroke_width=2, stroke_fill=(255, 255, 255))
+
     head = 70
-    W, H = img1.width + img2.width + 30, img1.height + head + 10
+    W, H = img1.width + img2.width + img3.width + 40, img1.height + head + 10
     out = Image.new("RGB", (W, H), (250, 250, 248))
     out.paste(img1, (10, head))
     out.paste(img2, (img1.width + 20, head))
+    out.paste(img3, (img1.width + img2.width + 30, head))
     d = ImageDraw.Draw(out)
     war = "at war" if tgt in enemies else "not at war"
     d.text((10, 8), f"{tag} vs {target}, {now:%d %b %Y %H:00}, {war}: {rep['divisions']} divisions ({rep['fast']} fast), "
@@ -196,6 +248,8 @@ def main():
            fill=(60, 60, 60), font=f_small)
     d.text((img1.width + 20, 40), "Forces: infantry+fast per province (purple = fast there), "
                                   "enemy organisation x strength (red)", fill=(60, 60, 60), font=f_small)
+    d.text((img1.width + img2.width + 30, 40), "Supply areas: our divisions / learned limit, average supply "
+           "(green = fine, orange to red = overloaded)", fill=(60, 60, 60), font=f_small)
     path = a.out or os.path.join(REPO, "recordings", "heatmaps",
                                  f"{tag}_{target}_{now:%Y%m%d_%H}_{datetime.datetime.now():%H%M%S}.png")
     os.makedirs(os.path.dirname(path), exist_ok=True)
