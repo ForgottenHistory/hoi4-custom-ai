@@ -201,6 +201,7 @@ def division_stats(fd, bats, sup, held, techs):
 
     out = collections.Counter()
     speeds, terrain = [], collections.defaultdict(lambda: collections.Counter())
+    hard, armor, pierce = [], [], []
     units = bats + sup
     for i, u in enumerate(units):
         b = fd.subunits.get(u, [])
@@ -221,12 +222,21 @@ def division_stats(fd, bats, sup, held, techs):
         if i < len(bats):  # support companies keep up with the division
             speeds.append((min(base) if base else 4.0) * (1 + mod.get("maximum_speed", 0) + bonus["maximum_speed"]))
         out["combat_width"] += mod.get("combat_width", 0)
+        out["max_strength"] += mod.get("max_strength", 0)
+        eqs = [eq_stats(a) for a in need]
+        hard.append(max((e.get("hardness", 0) for e in eqs), default=0))
+        armor.append(max((e.get("armor_value", 0) for e in eqs), default=0) * (1 + mod.get("armor_value", 0)))
+        pierce.append(max((e.get("ap_attack", 0) for e in eqs), default=0) * (1 + mod.get("ap_attack", 0)))
         for k, _, v in b:
             if k in TERRAIN_KEYS and isinstance(v, list):
                 for kk, x in _stats(v).items():
                     terrain[k][kk] += x
     out["maximum_speed"] = min(speeds) if speeds else 0
     n = max(1, len(units))
+    # roughly the game's: hardness averaged; armour and piercing weighted toward the best battalion
+    out["hardness"] = sum(hard) / n
+    out["armor"] = 0.3 * max(armor, default=0) + 0.7 * sum(armor) / n
+    out["piercing"] = 0.4 * max(pierce, default=0) + 0.6 * sum(pierce) / n
     out["terrain"] = {t: {k: x / n for k, x in c.items()} for t, c in terrain.items()}
     return out
 
@@ -284,7 +294,7 @@ def country(tag, divisions, proc, files=None):
         t["rows"].append(s)
     for t in out.values():
         rows = t.pop("rows")
-        for k in COMBAT + ("maximum_speed", "combat_width"):
+        for k in COMBAT + ("maximum_speed", "combat_width", "max_strength", "hardness", "armor", "piercing"):
             vals = [r[k] for r in rows]
             t[k] = sum(vals) / len(vals)
             t[k + "_range"] = (min(vals), max(vals))
