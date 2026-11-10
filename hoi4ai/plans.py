@@ -157,13 +157,14 @@ def calibrate(proc, army_id, front_id, division_ids, step=2000, width=4000, sel=
     return {p: sum(v) / len(v) for p, v in seen.items()}
 
 
-def make(m, armies, border, front_id, vps, ctrl, target, fast=None, near=4, reach=3, always=()):
+def make(m, armies, border, front_id, vps, ctrl, target, fast=None, near=30, reach=3, always=(), fade=8):
     """armies: {army id: [divisions]}; border: {our border province: position 0..1} on CFront FRONT_ID (from
     calibrate); vps: {province: victory points} of the target. Returns [(army id, front id, start, end, target
     province, [division ids])]. The armies other than FAST share the border between them, in the order they stand
     (each up to halfway to the next); the FAST army gets its own stretch, where the middle half of its divisions
-    stand. Each army's offensive line goes to the most valuable victory point within NEAR provinces across its
-    stretch (else the nearest)."""
+    stand. Each army's offensive line goes far (a player's way: drawn once, never finished, never redrawn): to the
+    victory point within NEAR provinces across its stretch with the most points for the distance (worth halves at
+    FADE provinces), else the nearest."""
     pv = m.provinces
 
     def d2(p, xy):
@@ -226,7 +227,7 @@ def make(m, armies, border, front_id, vps, ctrl, target, fast=None, near=4, reac
                     todo.append(n)
         cands = [q for q in vps if q in dist]
         if cands:
-            tgt = max(cands, key=lambda q: (vps[q] / (1 + dist[q]), -dist[q]))
+            tgt = max(cands, key=lambda q: (vps[q] / (1 + dist[q] / fade), -dist[q]))
         else:
             mid = stretch[len(stretch) // 2]
             tgt = min(vps, key=lambda q: d2(q, (pv[mid].x, pv[mid].y)))
