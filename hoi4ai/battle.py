@@ -8,8 +8,9 @@ hour with expected values, no dice:
   damage shrinks with its own HP, and with unpierced armour (the piercing table).
 - the attacker gets the template terrain modifiers, river crossing (-30% / -60%), over-width and stacking
   penalties; low supply (under 50%) costs the attacker 25% attack, the defender 15% defence.
-Left out: entrenchment, forts, planning, generals, air, experience, reserves joining, divisions retreating one by
-one. So it's a guide to which provinces are easy or hard, not a prediction.
+Divisions beyond the combat width wait in reserve: their organisation and HP refill the side as the front wears
+down (their attacks don't add). Left out: entrenchment, forts, planning, generals, air, experience, divisions
+retreating one by one. So it's a guide to which provinces are easy or hard, not a prediction.
 """
 
 DEFAULT = {"soft_attack": 40, "hard_attack": 5, "defense": 250, "breakthrough": 40, "combat_width": 20,
@@ -56,16 +57,22 @@ def fight(attackers, defenders, terrain, width, directions=1, river=0, att_suppl
         return 1.0, 0
     if not attackers:
         return 0.0, 0
-    # the attacker fits what the width allows, best first
-    attackers = sorted(attackers, key=lambda m: m[0].get("soft_attack", 0) * m[3], reverse=True)
-    used, front = 0, []
-    for m in attackers:
-        w = m[0].get("combat_width", DEFAULT["combat_width"])
-        if front and used + w > width * 1.0:
-            continue
-        front.append(m)
-        used += w
-    a, d = Side(front), Side(defenders)
+    # each side fits what the width allows, best first; the rest wait in reserve and take the place of those worn
+    # out (their organisation and HP join the fight, not their attacks)
+    def line_up(members, key):
+        used, front, reserve = 0, [], []
+        for m in sorted(members, key=key, reverse=True):
+            w = m[0].get("combat_width", DEFAULT["combat_width"])
+            if front and used + w > width * 1.0:
+                reserve.append(m)
+                continue
+            front.append(m)
+            used += w
+        return front, reserve, used
+    front, a_res, used = line_up(attackers, lambda m: m[0].get("soft_attack", 0) * m[3])
+    d_front, d_res, _ = line_up(defenders, lambda m: m[0].get("defense", 0) * m[3])
+    a, d = Side(front), Side(d_front)
+    ar, dr = Side(a_res), Side(d_res)
     att_mod = 1.0 + RIVER.get(river, 0)
     att_mod += sum(m[0].get("terrain", {}).get(terrain, {}).get("attack", 0) for m in front) / max(1, a.n)
     att_mod -= min(0.33, max(0, used / width - 1))  # over width
@@ -76,8 +83,9 @@ def fight(attackers, defenders, terrain, width, directions=1, river=0, att_suppl
     def_def = 1.0 - (0.15 if def_supply < 0.5 else 0)
     att_mod, def_mod = max(0.1, att_mod), max(0.1, def_mod)
 
-    ao, do_ = a.s["org"], d.s["org"]
-    ahp, dhp = a.s["hp"], d.s["hp"]
+    ao, do_ = a.s["org"] + ar.s.get("org", 0), d.s["org"] + dr.s.get("org", 0)
+    a_org, d_org = max(1, ao), max(1, do_)
+    ahp, dhp = a.s["hp"] + ar.s.get("hp", 0), d.s["hp"] + dr.s.get("hp", 0)
     a_full, d_full = max(1, a.s["hp"]), max(1, d.s["hp"])
     a_pierce, d_pierce = _pierce_factor(a.piercing, d.armor), _pierce_factor(d.piercing, a.armor)
     a_die = 3.5 if a.armor > d.piercing else 2.5  # organisation die of hits on the attacker
@@ -89,7 +97,7 @@ def fight(attackers, defenders, terrain, width, directions=1, river=0, att_suppl
     hours = 0
     while ao > 0 and do_ > 0 and hours < MAX_HOURS:
         hours += 1
-        ah, dh = ahp / a_full, dhp / d_full  # damage output shrinks with HP
+        ah, dh = min(1.0, ahp / a_full), min(1.0, dhp / d_full)  # damage output shrinks with HP (reserves refill it)
         a_att = (a.s["soft_attack"] * (1 - d.hardness) + a.s["hard_attack"] * d.hardness) / 10 * att_mod * ah
         d_att = (d.s["soft_attack"] * (1 - a.hardness) + d.s["hard_attack"] * a.hardness) / 10 * def_mod * dh
         on_d = hits(a_att, d.s["defense"] / 10 * def_mod * def_def * dh) * a_pierce
@@ -99,7 +107,7 @@ def fight(attackers, defenders, terrain, width, directions=1, river=0, att_suppl
         dhp -= on_d * 0.06 * 1.5
         ahp -= on_a * 0.06 * 1.5
     # how far ahead the winner is: what share of its starting organisation it still has
-    af, df = max(0, ao) / max(1, a.s["org"]), max(0, do_) / max(1, d.s["org"])
+    af, df = max(0, ao) / a_org, max(0, do_) / d_org
     if do_ <= 0 and ao > 0:
         return 0.5 + 0.5 * af, hours
     if ao <= 0 and do_ > 0:

@@ -15,7 +15,7 @@ import os
 from PIL import Image, ImageDraw
 
 import _bridge  # noqa: F401
-from controller import country_ids, enemies_of, friends_of, game_time
+from controller import country_ids, enemies_of, game_time, subjects_of
 from heatmap import FOE, FRIEND, OTHER, OURS, SEA, font, panel, ramp
 from hoi4ai import battle, mapdata, templates
 from hoi4ai.divisions import Snapshotter
@@ -44,7 +44,7 @@ def main():
     divs = Snapshotter(os.path.join(REPO, ".cache", "oddsmap_snap.tsv")).take()
     foe_tags = set(enemies_of(tag)) | {target}
     hostile = {cid[t] for t in foe_tags if t in cid}
-    ours = {me} | {cid[t] for t in friends_of(tag) if t in cid}
+    ours = {me} | {cid[t] for t in subjects_of(tag) if t in cid}  # an ally's border is not ours
     now = game_time(tag)
 
     proc = Process()

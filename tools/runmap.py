@@ -2,12 +2,14 @@
 
     python tools/runmap.py RUN_FOLDER [RUN_FOLDER ...] [--day 15 [DAY ...]] [--war-start "1939-08-18 17:00"]
                            [--cols 4] [--gif] [--labels You "Game AI" ...] [--out FILE] [--no-open]
+                           [--around HOL BEL LUX] [--all-enemies]
 
 One panel per run and day (tools/battlerec.py or a controller run), at the snapshot nearest to DAY days after the
 declaration (the run's first step at war, or --war-start when the run began after it): land taken from the target, the target's land still held, our divisions (fast and infantry
 apart, with how many stand in a province) and the target's, and the target's four most valuable victory points
 (names from the game's localisation), or the --cities named. Panels go in rows of --cols in one PNG; --gif also
-writes them as an animation.
+writes them as an animation. --around crops on those countries' land instead of the target's; --all-enemies
+counts every country at war with us at the declaration as the enemy (land taken, divisions), not only the target.
 """
 import argparse
 import collections
@@ -47,6 +49,8 @@ def main():
     ap.add_argument("--cities", nargs="*", default=[], help="victory points to mark (names, any prefix)")
     ap.add_argument("--out")
     ap.add_argument("--no-open", action="store_true")
+    ap.add_argument("--around", nargs="*", default=[], help="crop on these countries' land (tags)")
+    ap.add_argument("--all-enemies", action="store_true", help="every enemy at the declaration, not only the target")
     a = ap.parse_args()
     files = GameFiles()
     m = mapdata.load()
@@ -60,8 +64,15 @@ def main():
     r0 = runs[0]
     war0 = next(s["date"] for s in r0.status if s["at_war"] == "1")
     tgt0 = r0.ids[r0.meta["target"]]
-    start = r0.control[war0]
-    target_land = {p for p, c in start.items() if c == tgt0 and m.is_land(p)}
+    start = r0.control[war0] if war0 in r0.control else r0.control[min(r0.control)]
+    crop_ids = {r0.ids[t] for t in a.around if t in r0.ids} or {tgt0}
+    target_land = {p for p, c in start.items() if c in crop_ids and m.is_land(p)}
+    # only the land joined to ours (no colonies across the sea)
+    near, edge = set(), {p for p, c in start.items() if c == r0.ids[r0.meta["tag"]] and m.is_land(p)}
+    while edge:
+        edge = {q for p in edge for q in m.land_neighbours(p) if q in target_land and q not in near}
+        near |= edge
+    target_land = near or target_land
     xs = [m.provinces[p].x for p in target_land]
     ys = [m.provinces[p].y for p in target_land]
     pad = 70
@@ -83,11 +94,17 @@ def main():
         tag, target = run.meta["tag"], run.meta["target"]
         me, tgt = run.ids[tag], run.ids[target]
         war, date, at = snapshot_at(run, day, a.war_start)
+        if a.all_enemies:  # everyone at war with us at the run's first step at war
+            row = next(s for s in run.status if s["at_war"] == "1")
+            foe_tags = set(row["enemies"].split()) | {target}
+        else:
+            foe_tags = {target}
+        foe_ids = {run.ids[t] for t in foe_tags if t in run.ids}
         if len(a.day) > 1:
             label = f"{label}, day {at:.1f}" if len(runs) > 1 else f"Day {at:.1f}"
         ctrl = run.control[date]
         first = run.control[min(run.control)]
-        was_target = {p for p, c in first.items() if c == tgt}
+        was_target = {p for p, c in first.items() if c in foe_ids}
 
         def base(p):
             pr = m.provinces.get(p)
@@ -96,7 +113,7 @@ def main():
             c = ctrl.get(p)
             if c == me:
                 return TAKEN if p in was_target else HOME
-            return HELD if c == tgt else OTHER
+            return HELD if c in foe_ids else OTHER
 
         img = panel(ids, (y0, y1, x0, x1), scale, {}, base)
         d = ImageDraw.Draw(img)
@@ -111,7 +128,7 @@ def main():
             if p not in m.provinces:
                 continue
             kind = ("fast" if x["unit"] in fast_units else "inf") if x["owner"] == tag else (
-                "foe" if x["owner"] == target else None)
+                "foe" if x["owner"] in foe_tags else None)
             if kind:
                 here[p][kind] += 1
         rr = 4 + 2 * scale
@@ -135,10 +152,12 @@ def main():
                               outline=(0, 0, 0))
             d.text((cx + 5 + 2 * scale, cy - 3 * rr), names.get(p, str(p)), fill=(20, 20, 20), font=f_mid, anchor="lm",
                    stroke_width=2, stroke_fill=(255, 255, 255))
-        taken = sum(1 for p in was_target if ctrl.get(p) == me and m.is_land(p))
-        n_land = sum(1 for p in was_target if m.is_land(p))
+        shown = [p for p in was_target if m.is_land(p) and p in m.provinces
+                 and x0 <= m.provinces[p].x < x1 and y0 <= m.provinces[p].y < y1]  # on the map
+        taken = sum(1 for p in shown if ctrl.get(p) == me)
+        n_land = len(shown)
         foe = sum(c["foe"] for c in here.values())
-        panels.append((img, label, f"day {at:.1f} ({date[:10]}): {taken}/{n_land} provinces taken, {foe} Polish "
+        panels.append((img, label, f"day {at:.1f} ({date[:10]}): {taken}/{n_land} provinces taken, {foe} enemy "
                                     f"divisions left"))
 
     head, foot, gap = 56, 40, 12
@@ -156,9 +175,9 @@ def main():
         d.text((x, y + 6 + 18 + 3 * scale), sub, fill=(70, 70, 70), font=f_small)
     yy = rows * (ph + head) + 10
     xx = gap
-    for kind, col, text in (("box", TAKEN, "taken from Poland"), ("box", HELD, "still Polish"),
+    for kind, col, text in (("box", TAKEN, "taken from the enemy"), ("box", HELD, "still the enemy's"),
                             ("box", HOME, "German"), ("sq", FAST, "German fast divisions"),
-                            ("dot", INF, "German infantry"), ("dot", FOE, "Polish divisions"),
+                            ("dot", INF, "German infantry"), ("dot", FOE, "enemy divisions"),
                             ("star", (255, 215, 0), "city taken (white: not yet)")):
         if kind == "box":
             d.rectangle((xx, yy, xx + 16, yy + 16), fill=col, outline=(120, 120, 120))

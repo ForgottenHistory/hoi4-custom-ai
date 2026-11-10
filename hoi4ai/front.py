@@ -8,9 +8,10 @@
 - An attack counts only the divisions that fit the battle's combat width (the terrain's, widened for every extra
   province attacked from) and takes its attackers from the provinces around in turn: two divisions from two sides
   fight better than two from one.
-- Infantry is split evenly over the whole front (a player's rule): every province facing the enemy gets the same
-  number, up to max_stack, the main front and the strongest enemy first for the remainder. Only what is left once
-  the front is full stands behind the fast army.
+- Infantry concentrates where its attacks win (a player's way: through Holland, not the Belgian forts): every
+  front province gets a holder, then the rest go to the enemy provinces that the fewest divisions should beat
+  (the battle estimate, at infantry_goal), cheapest first, stacked in the front provinces next to them. What is
+  left is spread evenly over the front, then stands behind the fast army. (concentrate = False: even split.)
 - Attacks are decided by a rough battle estimate (hoi4ai/battle.py: both sides' template stats, organisation,
   strength, supply, terrain, combat width, rivers). All-out: the infantry attacks every enemy province next to it
   it should win (infantry_win), sending what stands around until the chance is high (infantry_goal).
@@ -41,6 +42,7 @@ Pure logic (no game calls). A Planner keeps state between calls (posts, chosen p
 so orders don't flap. plan() returns {division id: province} and a report; self.view holds what it saw.
 """
 import collections
+import copy
 import heapq
 import math
 
@@ -99,12 +101,14 @@ class Settings:
     attack_floor = 10000       # no attack below 10 organisation, whatever the share
     fast_cap = 5               # fast divisions sent at one province (the rest look for other openings)
     infantry_cap = 6           # infantry divisions sent at one province
-    width_slack = 1.25         # attackers fill the battle's combat width up to this much (a few in reserve
+    width_slack = 2.0          # attackers fill the battle's combat width up to this much (a few in reserve
                                # replace the worn-out); attacking from more provinces widens the battle
     fast_reach = 6.0           # fast army: how fast a victory point's pull fades with route cost
     fast_cutoff = 6.0          # ... and a point pulls nothing beyond this many fast_reach (e^-6)
     fast_objectives = 150      # at most this many points pull the fast army (the most valuable)
     fast_foe_weight = 2.0      # fast army: defenders count this much more on its routes (tanks go around strength)
+    concentrate = True         # infantry goes where its attacks win; False: split evenly over the front
+    concentrate_cap = 18       # most infantry planned against one enemy province (from all sides)
     target_front_only = True   # plan the front against the target only (and enemy land joined to it), not other borders
     max_stack = 6              # divisions per province we plan for (more starve: supply, attrition)
     spill_reach = 8            # divisions left over when every post is full go to a front province this close
@@ -524,12 +528,17 @@ class Planner:
             fscore = {p: v for p, v in fscore.items() if v < math.inf}
             body_front = set(fscore) or set(score)  # where reserves may spread along the line
             n_line, n_fast = line_in[c], fast_in[c]
-            # infantry is split evenly over the whole front: one division a province per round (the main front and
-            # where the enemy is strongest first), up to max_stack and only where supply has room. What is left
-            # once every front province is full stands behind the fast army
+            # infantry: a holder in every front province, then (concentrate) the rest where attacks win, then
+            # evenly over the whole front: one division a province per round (the main front and where the enemy
+            # is strongest first), up to max_stack and only where supply has room. What is left once every front
+            # province is full stands behind the fast army
             ranked = sorted(fr, key=lambda p: (p in main, sum(foe_power[q] for q in facing[p])), reverse=True)
             aload = self.area_load(line_demand)
             reserves = n_line
+            if s.concentrate:
+                reserves = self._concentrate(ranked, facing, foe_power, foes_at,
+                                             [d for d in line if comp.get(d.province) == c], reserves,
+                                             line_demand, aload)
             while reserves:
                 took = 0
                 for p in ranked:
@@ -633,6 +642,8 @@ class Planner:
             self.watch = watch
             self.cool = {k: v for k, v in self.cool.items() if v[1] > self.tick}
 
+            self.attack_log = []  # (label, province, eligible attackers, sent, win chance, defenders)
+
             def attack(targets, eligible, min_win, goal, quick, min_org, keep_home, label, cap):
                 # the battle estimate decides: attackers are added (the best of each province around in turn, as
                 # many directions as possible, within the battle's combat width) until the win chance reaches
@@ -676,6 +687,7 @@ class Planner:
                         win, hours = self.odds(t, under_way[t] + chosen, foes_at[t], True)
                         if win >= goal and hours <= quick:
                             break
+                    self.attack_log.append((label, t, len(pool), len(chosen), round(win, 2), len(foes_at[t])))
                     if chosen and win >= min_win:
                         under_way[t] += chosen
                         for d in chosen:
@@ -731,8 +743,10 @@ class Planner:
                                key=lambda t: foe_power[t])
             attack(in_pocket, lambda d: not self.is_fast(d), 0.0, 2.0, 0, s.attack_min_org, True, "pocket_attacks",
                    s.pocket_cap)
-            # infantry: local attacks where clearly stronger; weak, open, on-route provinces first
-            cands = {t for p in front for t in facing[p] if ctrl[t] == target and t not in pockets}
+            # infantry: local attacks where clearly stronger; weak, open, on-route provinces first. Any enemy land
+            # on the way to the target counts (the Low Countries before France), not the target's alone
+            on_way = joined or {t for t in enemy_land if ctrl[t] == target}
+            cands = {t for p in front for t in facing[p] if t in on_way and t not in pockets}
             ranked = sorted(cands, key=lambda t: (foe_power[t] + 10) * self.terrain(t) + route.get(t, 99) / 10)
             attack(ranked, lambda d: not self.is_fast(d), s.infantry_win, s.infantry_goal, s.infantry_hours,
                    s.attack_min_org,
@@ -825,6 +839,71 @@ class Planner:
                       overloaded=sum(1 for a, c in self.supply_cap.items() if in_area[a] > c),
                       over_supply=round(sum(max(0, in_area[a] - c) for a, c in self.supply_cap.items())))
         return orders, report
+
+    def _concentrate(self, ranked, facing, foe_power, foes_at, pool, reserves, demand, aload):
+        """Plan the infantry where its attacks win: a holder in each of RANKED (front provinces), then for every
+        defended enemy province next to them the fewest of POOL (our infantry, best first) that should beat it
+        (infantry_goal), cheapest first, stacked in the front provinces next to it. Fills DEMAND and AALOAD;
+        returns the reserves left."""
+        s = self.s
+        for p in ranked:  # a holder everywhere
+            if reserves and self.room(aload, p) >= 1:
+                demand[p] = demand.get(p, 0) + 1
+                aload[self.area(p)] += 1
+                reserves -= 1
+        if not reserves or not pool:
+            return reserves
+        pool = sorted(pool, key=lambda d: -self.attack_power(d))
+        sides_of = collections.defaultdict(list)
+        for p in ranked:
+            for q in facing[p]:
+                if foe_power[q] > 0:
+                    sides_of[q].append(p)
+
+        def stand_in(n, sides):
+            """N of the pool spread over SIDES in turn (how they'd attack)."""
+            out = []
+            for i, d in enumerate(pool[:n]):
+                x = copy.copy(d)
+                x.province = sides[i % len(sides)]
+                out.append(x)
+            return out
+
+        need = {}
+        for q, sides in sides_of.items():
+            cap = min(s.concentrate_cap, len(pool), s.max_stack * len(sides))
+            lo, hi = 1, cap
+            if self.odds(q, stand_in(hi, sides), foes_at[q]) < s.infantry_goal:
+                continue  # not even everything that fits wins it: hold
+            while lo < hi:  # the fewest that win (more attackers: better odds)
+                mid = (lo + hi) // 2
+                if self.odds(q, stand_in(mid, sides), foes_at[q]) >= s.infantry_goal:
+                    hi = mid
+                else:
+                    lo = mid + 1
+            need[q] = lo
+        for q in sorted(need, key=lambda q: (need[q], -foe_power[q])):
+            sides = sides_of[q]
+            more = need[q] - sum(demand.get(p, 0) for p in sides)
+            while more > 0 and reserves:
+                open_ = [p for p in sides if demand.get(p, 0) < s.max_stack and self.room(aload, p) >= 1]
+                if not open_:
+                    break
+                p = min(open_, key=lambda p: demand.get(p, 0))
+                demand[p] = demand.get(p, 0) + 1
+                aload[self.area(p)] += 1
+                reserves -= 1
+                more -= 1
+            if not reserves:
+                break
+        # then a second wave behind those attacks (to replace the worn-out and push on), up to max_stack
+        for q in sorted(need, key=lambda q: (need[q], -foe_power[q])):
+            for p in sides_of[q]:
+                while reserves and demand.get(p, 0) < s.max_stack and self.room(aload, p) >= 1:
+                    demand[p] = demand.get(p, 0) + 1
+                    aload[self.area(p)] += 1
+                    reserves -= 1
+        return reserves
 
     def _assign(self, group, demand, own, attacking, ctrl, hostile, orders, zones=None, front=(), rear=()):
         """REAR: divisions that only need a supplied place to rest (the nearest area with room)."""
