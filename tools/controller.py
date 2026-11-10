@@ -1,6 +1,6 @@
 """Run a country's army with our own planner (hoi4ai/front.py) instead of the game's AI.
 
-    python tools/controller.py --tag GER --target POL [--hours 4] [--dry-run] [--no-takeover] [--leave ARMY ...]
+    python tools/controller.py --tag GER --target POL [--hours 4] [--war-days 183] [--dry-run] [--no-takeover] [--leave ARMY ...]
     python tools/controller.py --tag POL --target GER --defend
 
 Start a new game, `observe` (or play another country), pause, then run this. It takes the country's army away
@@ -36,6 +36,7 @@ import takeover
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REFLEX_SECONDS = 1.0  # how often the light loop between plans runs (real seconds)
 FLOOD_HOPS = 6        # how far an idle fast division looks for an empty enemy province
+PLAN_RETRY_DAYS = 3  # battle plans not drawn before the war: tried again every step for this long in war
 RAIL_MIN_PIXELS = 150  # before the war a division sent farther than this (map pixels, about 6 provinces) goes by rail
 MONTHS = {m: i for i, m in enumerate(["january", "february", "march", "april", "may", "june", "july", "august",
                                       "september", "october", "november", "december"], 1)}
@@ -278,6 +279,8 @@ def main():
     ap.add_argument("--hours", type=int, default=4, help="in-game hours between planning steps")
     ap.add_argument("--dry-run", action="store_true", help="plan and log, send no moves")
     ap.add_argument("--once", action="store_true", help="one planning step, then stop")
+    ap.add_argument("--war-days", type=float, default=0,
+                    help="stop this many in-game days after the war with TARGET began (0: run until it capitulates)")
     ap.add_argument("--organize", action="store_true",
                     help="build the army structure first: a fast army, infantry armies, an army group with a field marshal")
     ap.add_argument("--group", type=int, nargs="+", metavar=("GROUP", "ARMY"),
@@ -517,7 +520,6 @@ def main():
             print("battle plans: no border with", target, "found" if not secs else "", "or no victory points")
         return bool(planned)
 
-    plans_tried_at_war = False
     if a.plans and group_armies and not a.dry_run and not planned:
         draw_plans()
     ticks = 0
@@ -684,8 +686,9 @@ def main():
             at_war = target in enemy_tags
             if at_war and war_start is None:
                 war_start = now
-            if at_war and a.plans and group_armies and not a.dry_run and not planned and not plans_tried_at_war:
-                plans_tried_at_war = True  # the war just made the fronts the plans are drawn on
+            if (at_war and a.plans and group_armies and not a.dry_run and not planned
+                    and now - war_start <= datetime.timedelta(days=PLAN_RETRY_DAYS)):
+                # the war makes the fronts the plans are drawn on, not always by the first step: try every step
                 draw_plans()
             mark("wars")
             if drawn and not a.dry_run:
@@ -852,6 +855,9 @@ def main():
             if capitulated:
                 days = (now - war_start).total_seconds() / 86400 if war_start else 0
                 print(f"{tag if a.defend else target} capitulated on {row['date']}, {days:.1f} days after the war began")
+                break
+            if a.war_days and war_start and (now - war_start).total_seconds() / 86400 >= a.war_days:
+                print(f"stopping: {a.war_days:g} days after the war began ({war_start:%Y-%m-%d %H:00})")
                 break
     except KeyboardInterrupt:
         print("stopped")
