@@ -76,11 +76,19 @@ def _tags(lines):
 
 
 def friends_of(tag):
-    """Countries whose land our front runs along: subjects, overlord, faction members. (Not mere military
+    """Countries whose land we may move through: subjects, overlord, faction members. (Not mere military
     access: a neutral's border is not ours to hold or attack from.)"""
     lines = query(f'{tag} = {{ every_other_country = {{ limit = {{ OR = {{ is_subject_of = {tag} '
                   f'{tag} = {{ is_subject_of = PREV }} is_in_faction_with = {tag} }} }} '
                   f'log = "[THIS.GetFlag]" }} }}')
+    return _tags(lines)
+
+
+def subjects_of(tag):
+    """Countries whose land our front runs along: our subjects and our overlord. A faction member's border is
+    its own to hold (Italy's Alps against France): planning it pulled our infantry into its mountains."""
+    lines = query(f'{tag} = {{ every_other_country = {{ limit = {{ OR = {{ is_subject_of = {tag} '
+                  f'{tag} = {{ is_subject_of = PREV }} }} }} log = "[THIS.GetFlag]" }} }}')
     return _tags(lines)
 
 
@@ -664,6 +672,7 @@ def main():
             enemy_tags = enemies_of(tag)
             enemy_ids = [ids[t] for t in enemy_tags if t in ids]
             friend_ids = [ids[t] for t in friends_of(tag) if t in ids]
+            front_ids = [ids[t] for t in subjects_of(tag) if t in ids]  # whose land the plan holds
             at_war = target in enemy_tags
             if at_war and war_start is None:
                 war_start = now
@@ -713,7 +722,7 @@ def main():
             else:
                 orders, rep = planner.plan(provinces.controller,
                                            [d for d in divs if not (a.execute and d.owner == tag and d.army in planned)],
-                                           tag, enemy_ids, tgt, at_war, friend_ids, zones=zone)
+                                           tag, enemy_ids, tgt, at_war, front_ids, zones=zone)
                 stops = planner.stops
             mark("plan")
             mine = {d.id: d for d in divs if d.owner == tag}

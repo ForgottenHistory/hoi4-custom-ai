@@ -105,7 +105,7 @@ class Settings:
     fast_cutoff = 6.0          # ... and a point pulls nothing beyond this many fast_reach (e^-6)
     fast_objectives = 150      # at most this many points pull the fast army (the most valuable)
     fast_foe_weight = 2.0      # fast army: defenders count this much more on its routes (tanks go around strength)
-    target_front_only = True   # plan the front against the target only, not its allies' borders
+    target_front_only = True   # plan the front against the target only (and enemy land joined to it), not other borders
     max_stack = 6              # divisions per province we plan for (more starve: supply, attrition)
     spill_reach = 8            # divisions left over when every post is full go to a front province this close
     axis_tie = 1.15            # fast army starts within this much of the best route compete on how they split the enemy
@@ -440,10 +440,14 @@ class Planner:
 
         facing = {p: [q for q in self.nb(p) if ctrl[q] in hostile] for p in own}
         front = {p for p, f in facing.items() if f}
-        main = {p for p in front if any(ctrl[q] == target for q in facing[p])}
+        # the main front faces the target, or enemy land joined to the target's by land (the Low Countries on
+        # the way to France): a way to the target runs through it
+        hostile_land = {p for p in land if ctrl[p] in hostile}
+        joined = set(self.bfs([p for p in hostile_land if ctrl[p] == target], hostile_land)) if target else set()
+        main = {p for p in front if any(q in joined for q in facing[p])}
         if s.target_front_only and main:
-            # other enemies' borders (France joining a war on Poland) are left to the armies the player keeps
-            # (controller --leave): spreading the infantry over them pulled it away from the target
+            # other enemies' borders cut off from the target (France joining a war on Poland) are left to the
+            # armies the player keeps (controller --leave): spreading the infantry over them pulled it away
             front = main
 
         enemy_land = {p for p in land if ctrl[p] in hostile}
