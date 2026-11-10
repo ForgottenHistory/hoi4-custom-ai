@@ -34,6 +34,8 @@ from hoi4ai.live import Provinces
 import takeover
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REFLEX_SECONDS = 1.0  # how often the light loop between plans runs (real seconds)
+FLOOD_HOPS = 6        # how far an idle fast division looks for an empty enemy province
 RAIL_MIN_PIXELS = 150  # before the war a division sent farther than this (map pixels, about 6 provinces) goes by rail
 MONTHS = {m: i for i, m in enumerate(["january", "february", "march", "april", "may", "june", "july", "august",
                                       "september", "october", "november", "december"], 1)}
@@ -512,6 +514,13 @@ def main():
     railing = {}  # division id -> [rail target, last province seen, steps without moving]: on a train, left alone
     war_start = None
     last = None
+    # between full plans (every --hours in-game hours, a few seconds of real time each) a light loop runs every
+    # REFLEX_SECONDS: divisions that stopped short of where the plan sends them (at a waypoint, or the game
+    # dropped the order) get their next stretch, and fast divisions with nothing left to do take the nearest
+    # empty enemy province. It only reads our divisions and the map's control, so it costs ~0.1 s
+    goals = {}     # division id -> [province the last plan sends it to, kind of order]
+    resent = {}    # division id -> province it was in when the light loop last ordered it (once per place)
+    reflex_t = 0.0
     held = False  # we paused the game for this step (bridge.pause); never resume a pause that isn't ours
 
     def hold():
@@ -528,6 +537,67 @@ def main():
             send("bridge.pause off")
             held = False
 
+    def reflex(now):
+        """The light loop (see goals): re-order divisions that stopped short, send idle fast ones on."""
+        divs_now = take()
+        mine = {d.id: d for d in divs_now if d.owner == tag}
+        idle = [(did, g) for did, g in goals.items() if did in mine and not mine[did].moving and did not in railing
+                and resent.get(did) != mine[did].province]
+        if not idle:
+            return
+        provinces.refresh()
+        ctrl = provinces.controller
+        ally = {me, *friend_ids}
+        hostile = set(enemy_ids)
+        foe_at = {x.province for x in divs_now if x.owner in set(enemy_tags)}
+        ours_land = {p for p in m.provinces if m.is_land(p) and ctrl[p] in ally}
+        open_land = ours_land | {p for p in m.provinces if m.is_land(p) and ctrl[p] in hostile and p not in foe_at}
+        claimed = {g[0] for g in goals.values()}
+        cmds, batch = [], []
+        for did, g in idle:
+            d = mine[did]
+            goal, kind = g
+            if d.province == goal or (kind == "attack" and ctrl[goal] in ally):  # there, or someone took it
+                if kind != "attack" or not planner.is_fast(d) or d.share < planner.s.fast_min_org:
+                    continue
+                goal = flood_target(d.province, open_land, ctrl, hostile, foe_at, claimed)
+                if goal is None:
+                    continue
+                g[0] = goal
+                claimed.add(goal)
+            prov = goal
+            if prov not in planner.nb(d.province):
+                prov = planner.waypoint(d.province, goal, ours_land if kind == "post" else open_land) or goal
+            if prov == d.province:
+                continue
+            resent[did] = d.province
+            cmds.append(f"bridge.move {did} {prov}")
+            batch.append((d, prov, kind))
+        sent = 0
+        for i in range(0, len(cmds), 100):
+            for (d, prov, kind), r in zip(batch[i:i + 100], send(*cmds[i:i + 100])):
+                sent += r.startswith("OK")
+                log.move(now, d, prov, kind + "-light", "ok" if r.startswith("OK") else r)
+        if cmds:
+            print(f"  {now:%Y-%m-%d %H:00} light loop: {sent}/{len(cmds)} divisions sent on")
+
+    def flood_target(start, open_land, ctrl, hostile, foe_at, claimed, hops=FLOOD_HOPS):
+        """The nearest enemy-held province with no enemy troops in it and no division of ours headed there,
+        reachable from START through open land within HOPS provinces."""
+        seen, edge = {start}, [start]
+        for _ in range(hops):
+            nxt = []
+            for p in edge:
+                for q in planner.nb(p):
+                    if q in seen or q not in open_land:
+                        continue
+                    seen.add(q)
+                    if ctrl[q] in hostile and q not in claimed:
+                        return q
+                    nxt.append(q)
+            edge = nxt
+        return None
+
     print(f"running {tag} against {target}, a plan every {a.hours} in-game hours; logs in {log.folder}")
     try:
         while True:
@@ -538,7 +608,14 @@ def main():
                 time.sleep(2)
                 continue
             if last and now - last < datetime.timedelta(hours=a.hours):
-                time.sleep(0.25)
+                if goals and at_war and not a.dry_run and time.perf_counter() - reflex_t >= REFLEX_SECONDS:
+                    reflex_t = time.perf_counter()
+                    try:
+                        reflex(now)
+                    except (BridgeError, BridgeUnavailable, ValueError) as e:
+                        print("light loop:", e)
+                else:
+                    time.sleep(0.1)
                 continue
             last = now
             t0 = time.time()
@@ -674,13 +751,17 @@ def main():
                 ours_land = {p for p in m.provinces if m.is_land(p) and ctrl[p] in {me, *friend_ids}}
                 open_land = ours_land | {p for p in m.provinces if m.is_land(p) and ctrl[p] in hostile_ids
                                          and p not in foe_at}
+            goals.clear()
+            resent.clear()
             for did, prov in orders.items():
                 d = mine.get(did)
+                kind = "attack" if ctrl[prov] in hostile_ids else "post"
+                if d is not None:
+                    goals[did] = [prov, kind]
                 if d is None or (d.province == prov and not d.moving):
                     continue
                 if did in railing and railing[did][0] == prov:
                     continue  # on its way by train: a new order would take it off the train
-                kind = "attack" if ctrl[prov] in hostile_ids else "post"
                 if at_war and d.province != prov and prov not in planner.nb(d.province):
                     w = planner.waypoint(d.province, prov, ours_land if kind == "post" else open_land)
                     if w is not None:
@@ -694,6 +775,7 @@ def main():
                 cmds.append(f"bridge.rail {did} {prov}" if kind == "rail" else f"bridge.move {did} {prov}")
                 batch.append((d, prov, kind))
             for d in stops:  # attacks to call off
+                goals.pop(d.id, None)  # the light loop leaves it where it is
                 cmds.append(f"bridge.stop {d.id}" if can_stop else f"bridge.move {d.id} {d.province}")
                 batch.append((d, d.province, "stop"))
             if cmds and not a.dry_run:
