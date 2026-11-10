@@ -118,8 +118,8 @@ class Settings:
     point_drop = 1.5           # a chosen fast point is given up when its route is this much dearer than the best
     point_odds = True          # at war the fast army's point is where its tanks would win (spear_win), the route
                                # only choosing among those; none would: the best odds
-    fast_stall_steps = 12      # planning steps (2 days at 4 hours) the fast army may go without attacking or driving
-                               # from its point before the point is given up
+    fast_stall_steps = 18      # planning steps (3 days at 4 hours) the fast army's point may go without our taking
+                               # an enemy province within 2 of it before the point is given up
     fast_ban_steps = 18        # ... and that point and its sector are not chosen again for this many steps
     point_hold = 0.1           # the fast army keeps its point while its odds there are this close to good
     exploit_reach = 8          # fast divisions drive this many provinces deep into empty enemy land
@@ -143,7 +143,7 @@ class Planner:
         self.hold = {}              # division id -> province it holds / stages at
         self.points = {}            # province -> (kind 'fast' | 'support', steps left)
         self.drive = {}             # fast division id -> the empty enemy province it drives to
-        self.fast_active = None     # planning step the fast army last attacked or drove (None: not at war yet)
+        self.fast_gain = {}         # fast point -> (step of its last gain, enemy provinces within 2 of it then)
         self.fast_ban = {}          # province -> step until which it may not be the fast army's point (it stalled)
         self.watch = {}             # attacking division id -> (target, step of last loss, strength, share, {defender id: (strength, share)})
         self.cool = {}              # division id -> (province it gave up attacking, step it may again)
@@ -545,8 +545,6 @@ class Planner:
             return any(foe_power[q] > 0 for q in f)
 
         report = collections.Counter()
-        if at_war and self.fast_active is None:
-            self.fast_active = self.tick  # the war's first step: the fast army's clock starts
         line_demand, fast_demand, sectors = {}, {}, {}
         for c, fr in front_in.items():
             fr = {p for p in fr if needs_holder(p)}
@@ -590,14 +588,22 @@ class Planner:
                       if any(q in body and foe_power[q] == 0 for q in facing[p])} if at_war else {}
             fcand = breach or fscore
             fpts = [p for p, (k, _) in self.points.items() if k == "fast" and comp.get(p) == c]
-            if at_war and fpts and self.fast_active is not None and self.tick - self.fast_active >= s.fast_stall_steps:
-                # the fast army stood at its point without attacking or driving: try somewhere else
-                for b in fpts:
-                    for q in self.sector(b, fcand):
+            for b in fpts:
+                # progress at the point: an enemy province near it taken (the clock starts again) or none for
+                # FAST_STALL_STEPS (the tanks are stuck there, whatever the odds say: try somewhere else)
+                near = {q for n in self.nb(b) for q in (n, *self.nb(n)) if q in land and ctrl[q] in hostile}
+                since, before = self.fast_gain.get(b, (None, None))
+                if not at_war:
+                    continue
+                if since is None or any(ctrl[q] not in hostile for q in before):
+                    self.fast_gain[b] = (self.tick, near)
+                elif self.tick - since >= s.fast_stall_steps:
+                    for q in self.sector(b, fscore):
                         self.fast_ban[q] = self.tick + s.fast_ban_steps
                     del self.points[b]
-                self.fast_active = self.tick
-                report["fast_stalled"] += 1
+                    report["fast_stalled"] += 1
+            self.fast_gain = {b: v for b, v in self.fast_gain.items() if b in self.points}
+            fpts = [b for b in fpts if b in self.points]
             pick = {p: v for p, v in fcand.items() if self.fast_ban.get(p, 0) <= self.tick} or fcand
             if at_war and s.point_odds and n_fast and pick:
                 # where the tanks would win: the strongest spearhead of this piece of land, rested, attacking
@@ -796,12 +802,6 @@ class Planner:
                 orders[d.id] = t
                 attacking.add(d.id)
                 report["drives"] += 1
-            # the fast army counts as active while it attacks or drives, or when most of it is too worn out to
-            # (resting is not standing still at a bad point)
-            ready = [d for d in fast if self.can_attack(d, s.fast_min_org)]
-            if (report["fast_attacks"] or report["drives"] or len(ready) < len(fast) / 2
-                    or any(d.moving and d.dest in land and ctrl[d.dest] in hostile for d in fast)):
-                self.fast_active = self.tick
             # pockets first: everything that fits, whatever the odds, the weakest defenders first
             in_pocket = sorted({t for p in front for t in facing[p] if t in pockets and foe_power[t] > 0},
                                key=lambda t: foe_power[t])
