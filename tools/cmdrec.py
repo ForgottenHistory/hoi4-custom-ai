@@ -18,7 +18,7 @@ decommissioned or removed, to division_templates.tsv.
 Equipment designs (hoi4ai/equipmentrec.py): every country's designs at the start, then each new design (with the one
 it's based on) and each made obsolete, to equipment_designs.tsv.
 Production lines (hoi4ai/productionrec.py): every country's military lines at the start, then each line added,
-changed (factories, design, priority, manufacturer) or removed, to production_lines.tsv.
+changed (factories, design, priority, MIO assigned or removed) or removed, to production_lines.tsv.
 Analyse with analyze_cmdrec.py.
 """
 import argparse

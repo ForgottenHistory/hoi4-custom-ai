@@ -145,9 +145,10 @@ isn't readable from the design itself, so only changes made while recording show
 Production lines (`hoi4ai/productionrec.py`): `production_lines.tsv` gets every country's military production lines
 at the start, then each line `new`, `changed` or `removed`: date, change, line id, owner (the design's owner, so a
 licensed design shows the licensor), design id, design name, factories, priority (0 = top of the list),
-manufacturer (military industrial organisation id). A change is adding or taking away factories, switching the
-line to another design, moving it in the list (moving one line shifts the priorities of the lines around it) or
-changing the manufacturer. The lines are read (under a second) after each production command in the record (those
+manufacturer (military industrial organisation id, 0 = none), manufacturer name (its token,
+`GER_messerschmitt_organization`, from the owner's save-format block). A change is adding or taking away factories,
+switching the line to another design, moving it in the list (moving one line shifts the priorities of the lines
+around it) or assigning, switching or removing the MIO. The lines are read (under a second) after each production command in the record (those
 lines say who acted) and each in-game day, which catches the AI: it changes its lines without commands. Naval lines
 aren't covered yet. `--no-production` turns it off.
 
