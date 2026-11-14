@@ -96,6 +96,19 @@ first step at war, or `--war-start` when the run began after it).
 
 ## Recording commands
 
+What a recording holds, and what it doesn't:
+
+- Decisions, as tables: the commands, events answered, division templates, equipment designs (modules, the design
+  they're based on), production lines (design, factories, priority, MIO) and MIO traits. A row says what was chosen,
+  not what it does: a trait is its token, a design its modules.
+- Results, as raw state: the recorded country's whole save-format block each day (`country/DAY.txt.gz`): output and
+  efficiency of each production line, stockpile, MIO funds and size, research, manpower... Only a few headline
+  numbers are pulled out (`country.tsv`); the rest has to be compared across days afterwards.
+- Not recorded: what a choice means (a trait's bonus, a design's stats and cost). These follow from the game files
+  (`common/military_industrial_organization`, equipment modules, localisation for the in-game names) and can be
+  decoded afterwards. Other countries' state is also not kept: their decisions are logged (lines, designs,
+  templates; MIOs weekly) but not their output or stockpiles.
+
 ### `cmdrec.py`
 
     python tools/cmdrec.py [--dir FOLDER] [--tag TAG]
