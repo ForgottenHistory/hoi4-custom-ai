@@ -10,8 +10,8 @@ hoi4ai/planrec.py), the country's state each day (country/, country.tsv, hoi4ai/
 (division_templates.tsv, hoi4ai/templaterec.py), every country's equipment designs and the ones made obsolete
 (equipment_designs.tsv, hoi4ai/equipmentrec.py; obsolete needs the record), and every country's production lines as
 they change (production_lines.tsv, hoi4ai/productionrec.py), MIO sizes, points and traits (mios.tsv,
-hoi4ai/miorec.py), market contracts and listings (market.tsv, hoi4ai/marketrec.py), and every country's doctrines
-(doctrines.tsv, hoi4ai/doctrinerec.py). It stops a
+hoi4ai/miorec.py), market contracts and listings (market.tsv, hoi4ai/marketrec.py), every country's doctrines
+(doctrines.tsv, hoi4ai/doctrinerec.py), and officer corps spirits (spirits.tsv, hoi4ai/spiritrec.py). It stops a
 step after the target capitulates, --war-days after the declaration, or with Ctrl+C. Our own controller records the same way by itself.
 
 Recordings go to recordings/battle_<label>_<TAG>_<time>/.
@@ -23,7 +23,7 @@ import time
 
 import _bridge  # noqa: F401
 from hoi4bridge import BridgeError, BridgeUnavailable, send, trigger
-from hoi4ai import countryrec, doctrinerec, equipmentrec, eventrec, marketrec, miorec, planrec, productionrec, templaterec
+from hoi4ai import countryrec, doctrinerec, equipmentrec, eventrec, marketrec, miorec, planrec, productionrec, spiritrec, templaterec
 from hoi4ai.battlerec import BattleRecorder
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.live import Provinces
@@ -59,6 +59,8 @@ def main():
     market = marketrec.MarketLog(os.path.join(folder, "market.tsv"), events and events.names, [tag],
                                  lambda: mios.others)
     doctrines = doctrinerec.DoctrineLog(os.path.join(folder, "doctrines.tsv"), events and events.names)
+    spirits = spiritrec.SpiritLog(os.path.join(folder, "spirits.tsv"), events and events.names, [tag],
+                                  lambda: mios.others)
     plans = planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = countryrec.CountryLog(folder, tag)
     provinces = Provinces()
@@ -127,6 +129,10 @@ def main():
                 doctrines.step(f"{now:%Y-%m-%d %H:00}", events.lines if events else ())
             except (OSError, BridgeError, BridgeUnavailable) as e:
                 print("doctrines:", e)
+            try:   # without the record: read each day
+                spirits.step(f"{now:%Y-%m-%d %H:00}", events.lines if events else ())
+            except (OSError, BridgeError, BridgeUnavailable) as e:
+                print("spirits:", e)
             taken = int(((provinces.owner == ids[target]) & (provinces.controller == ids[tag])).sum())
             print(f"{now:%Y-%m-%d %H:00} war={int(at_war)} divisions={len(divs)} taken={taken}")
             done = capitulated
@@ -147,6 +153,7 @@ def main():
             production.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
             market.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
             doctrines.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
+            spirits.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
     print("recorded into", folder)
 
 

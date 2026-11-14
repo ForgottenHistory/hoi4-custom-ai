@@ -25,6 +25,8 @@ Market (hoi4ai/marketrec.py): every purchase contract between any two countries 
 factories, cost) and the equipment the country has up for sale, as they appear, change and end, to market.tsv.
 Doctrines (hoi4ai/doctrinerec.py): every country's grand doctrines and subdoctrines at the start, then each one
 picked or replaced, to doctrines.tsv.
+Officer corps spirits (hoi4ai/spiritrec.py): the army, navy and air spirits of the country each day and of every
+other producing country each week, as they are picked and replaced, to spirits.tsv.
 Analyse with analyze_cmdrec.py.
 """
 import argparse
@@ -33,7 +35,7 @@ import re
 import time
 
 import _bridge  # noqa: F401  (puts the hoi4-bridge client on the path)
-from hoi4ai import countryrec, doctrinerec, equipmentrec, eventrec, marketrec, miorec, planrec, productionrec, templaterec
+from hoi4ai import countryrec, doctrinerec, equipmentrec, eventrec, marketrec, miorec, planrec, productionrec, spiritrec, templaterec
 from hoi4ai.gamefiles import game_dir
 from hoi4bridge import BridgeError, player_tag, query, send
 
@@ -74,6 +76,7 @@ def main():
     ap.add_argument("--no-mios", action="store_true", help="no MIO log (mios.tsv)")
     ap.add_argument("--no-market", action="store_true", help="no market log (market.tsv)")
     ap.add_argument("--no-doctrines", action="store_true", help="no doctrine log (doctrines.tsv)")
+    ap.add_argument("--no-spirits", action="store_true", help="no officer corps spirit log (spirits.tsv)")
     a = ap.parse_args()
 
     try:
@@ -104,6 +107,8 @@ def main():
                                                           lambda: mios.others if mios else ())
     doctrines = None if a.no_doctrines else doctrinerec.DoctrineLog(os.path.join(folder, "doctrines.tsv"),
                                                                     events.names)
+    spirits = None if a.no_spirits else spiritrec.SpiritLog(os.path.join(folder, "spirits.tsv"), events.names, [tag],
+                                                            lambda: mios.others if mios else ())
     plans = None if a.no_plans else planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = None if a.no_country else countryrec.CountryLog(folder, tag)
     send(f"bridge.cmdrec mark player={player}")
@@ -169,6 +174,11 @@ def main():
                         doctrines.step(d, events.lines)
                     except (OSError, BridgeError) as e:
                         print("doctrines:", e)
+                if spirits:
+                    try:
+                        spirits.step(d, events.lines)
+                    except (OSError, BridgeError) as e:
+                        print("spirits:", e)
                 if not a.no_snap and day and day != last_day:
                     send(f"bridge.snap {day} 51 {SNAP_FIELDS}")
                     last_day = day
@@ -188,6 +198,8 @@ def main():
             market.step(last, events.lines)
         if doctrines and last:
             doctrines.step(last, events.lines)
+        if spirits and last:
+            spirits.step(last, events.lines)
 
 
 if __name__ == "__main__":

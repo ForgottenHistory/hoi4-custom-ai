@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -99,7 +99,7 @@ first step at war, or `--war-start` when the run began after it).
 What a recording holds, and what it doesn't:
 
 - Decisions, as tables: the commands, events answered, division templates, equipment designs (modules, the design
-  they're based on), production lines (design, factories, priority, MIO), MIO traits, market purchases and listings, and doctrines. A row says what was chosen,
+  they're based on), production lines (design, factories, priority, MIO), MIO traits, market purchases and listings, doctrines and officer corps spirits. A row says what was chosen,
   not what it does: a trait is its token, a design its modules.
 - Results, as raw state: the recorded country's whole save-format block each day (`country/DAY.txt.gz`): output and
   efficiency of each production line, stockpile, MIO funds and size, research, manpower... Only a few headline
@@ -107,7 +107,7 @@ What a recording holds, and what it doesn't:
 - Not recorded: what a choice means (a trait's bonus, a design's stats and cost). These follow from the game files
   (`common/military_industrial_organization`, equipment modules, localisation for the in-game names) and can be
   decoded afterwards. Other countries' state is also not kept: their decisions are logged (lines, designs,
-  templates, market contracts, doctrines; MIOs and sale listings weekly) but not their output or stockpiles.
+  templates, market contracts, doctrines; MIOs, sale listings and spirits weekly) but not their output or stockpiles.
 
 ### `cmdrec.py`
 
@@ -193,6 +193,15 @@ read from memory (`CCountryDoctrineStatus@NDoctrines`; the save-format block has
 after a doctrine command; finding the objects is a memory scan (~10 s) at the start and every 7 days. In the record,
 picking is `CUnlockGrandDoctrineCommand@NDoctrines` (template pointer +0x28, country +0x30) and
 `CUnlockSubDoctrineCommand@NDoctrines` (folder +0x28, subdoctrine +0x30, country +0x3c). `--no-doctrines` turns it off.
+
+Officer corps spirits (`hoi4ai/spiritrec.py`): `spirits.tsv` gets the army, navy and air spirits of each country, at
+its first read and then as each slot is filled (`new`), replaced (`changed`) or emptied (`removed`): date, change,
+country, branch (`army`, `navy`, `air`), slot (`academy_spirit`, `army_spirit`, `division_command_spirit`,
+`naval_academy_spirit`, ...), spirit and was (idea keys). Spirits are ideas, read from `ideas={...}` in the
+save-format block (the slots and their ideas from `common/idea_tags` and `common/ideas`): the country's each day,
+other producing countries' every 7 days, and a country's at once after an idea command for it. In the record, filling
+a slot is `CAddIdeaCommand` (country +0x28, `CIdea*` +0x30, its name at +0x18) and replacing one is
+`CReplaceIdeaCommand` (country +0x28, old +0x30, new +0x38). `--no-spirits` turns it off.
 
 ### `analyze_cmdrec.py`
 
