@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -104,6 +104,11 @@ Records every command the game executes (player and AI) while you play: turns on
 the in-game date into the record until Ctrl+C, which turns recording off. Each new in-game day it also snapshots
 every division (`bridge.snap`) into `unit_snapshots.tsv`: owner, province, order, organisation, strength,
 template.
+
+Battle plans: the record also holds the lists behind battle-plan commands (divisions, path points,
+fortification provinces), and each in-game hour the country's lines are read from memory into `plans.tsv` when they
+changed: army, cohesion, kind, line id, parent line, executing, provinces, border pairs. `hoi4ai/planrec.py` has the
+layouts and `decode()` for each battle-plan command. `--no-plans` turns it off.
 
 ### `analyze_cmdrec.py`
 

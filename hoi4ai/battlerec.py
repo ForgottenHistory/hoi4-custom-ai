@@ -12,6 +12,7 @@ A recording is a folder:
   control.tsv    who controls each province: every province at the first step, then only the changes
   casualties.tsv per step at war: our losses and the target's in our war with it, as the war summary counts them
                  (hoi4ai.wars; manpower, cumulative)
+  plans.tsv      the country's battle plans whenever they changed (written by tools/battlerec.py, hoi4ai/planrec.py)
 Steps are in-game times; the caller decides how often (tools/battlerec.py: every few in-game hours).
 """
 import datetime

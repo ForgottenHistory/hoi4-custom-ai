@@ -8,6 +8,8 @@
 Turns on bridge.cmdrec, then keeps stamping the in-game date into the record ("#mark" lines) until
 Ctrl+C, which turns recording off. Each new in-game day it also snapshots every division (bridge.snap) into
 unit_snapshots.tsv: owner, province, order, organisation candidates, strength, template.
+Battle plans: the record also holds the lists behind the battle-plan commands (hoi4ai/planrec.py rules), and each
+in-game hour the player's (or --tag's) lines are read from memory and written to plans.tsv when they changed.
 Analyse with analyze_cmdrec.py.
 """
 import argparse
@@ -16,6 +18,7 @@ import re
 import time
 
 import _bridge  # noqa: F401  (puts the hoi4-bridge client on the path)
+from hoi4ai import planrec
 from hoi4ai.gamefiles import game_dir
 from hoi4bridge import BridgeError, player_tag, query, send
 
@@ -48,6 +51,7 @@ def main():
     ap.add_argument("--skip", nargs="*", default=[], help="command classes not to record")
     ap.add_argument("--interval", type=float, default=0.25, help="seconds between date checks")
     ap.add_argument("--no-snap", action="store_true", help="no daily division snapshots")
+    ap.add_argument("--no-plans", action="store_true", help="no battle-plan snapshots (plans.tsv)")
     a = ap.parse_args()
 
     try:
@@ -59,7 +63,9 @@ def main():
     os.makedirs(folder, exist_ok=True)
     if a.skip:
         print(send("bridge.cmdrec skip " + " ".join(a.skip))[0])
+    planrec.install_rules()
     print(send("bridge.cmdrec on " + os.path.join(folder, "command_record.tsv"))[0])
+    plans = None if a.no_plans else planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     send(f"bridge.cmdrec mark player={player}")
     print(f"player: {player}, date from {tag}")
     if not a.no_snap:
@@ -78,6 +84,12 @@ def main():
                 print(f"\r{d}  commands: {n.split()[-1]}      ", end="", flush=True)
                 last = d
                 day = day_label(d)
+                hour = re.match(r"(\d+):", d)
+                if plans and day and hour:
+                    try:
+                        plans.step(f"{day} {int(hour.group(1)):02d}:00")
+                    except (OSError, BridgeError) as e:
+                        print("plans:", e)
                 if not a.no_snap and day and day != last_day:
                     send(f"bridge.snap {day} 51 {SNAP_FIELDS}")
                     last_day = day
