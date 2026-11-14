@@ -114,7 +114,10 @@ Country state (`hoi4ai/countryrec.py`): each in-game day the country's whole sav
 production lines, stockpile, research, politics, focus, training queue, divisions) goes to `country/DAY.txt.gz`,
 headline numbers (political power, manpower, factories, fuel, experience, stability, war support) to `country.tsv`,
 and the division templates and equipment variants the block names by id to `templates.tsv` (when one appears or
-changes) and `equipment.tsv`. `--no-country` turns it off.
+changes) and `equipment.tsv`. `intel.tsv` holds the country's intel (civilian, army, navy, air, 0-100) over every
+other country each day: the player's fog of war, since what the map shows of a country's army follows army intel
+(division counts "?" below 10%, then approximate; template details from 30%, exact from 80%). `--no-country` turns it
+off.
 
 ### `analyze_cmdrec.py`
 

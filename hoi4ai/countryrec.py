@@ -8,6 +8,10 @@ CountryLog(folder, tag).step(day) writes, once per day:
   templates.tsv       division templates the block names (division_template_id, handle 52): name, battalions,
                       support companies; written when a template first shows up or changes
   equipment.tsv       equipment variants the block names (handle 70): name, type, modules; written once each
+  intel.tsv           the country's intel over every other existing country, 0-100 (negative: their counter-intelligence
+                      outweighs it): civilian, army, navy, air. This is the player's fog of war: the map shows what army
+                      intel allows (below 10% division counts are "?", then counts with an error range shrinking to
+                      70%, template info from 30%, exact templates from 80%: the NIntel ARMY_* defines)
 
 The block refers to templates and equipment by handle ({ id=96 type=70 }); the two tables give those ids names.
 """
@@ -22,6 +26,7 @@ VARIABLES = ["political_power", "command_power", "manpower", "num_of_factories",
              "num_of_available_military_factories", "num_divisions", "fuel_k", "max_fuel_k", "army_experience",
              "navy_experience", "air_experience", "num_of_controlled_states"]
 BLOCK_NUMBERS = ["stability", "war_support"]   # top-level lines of the block (the game variables read 0 for these)
+INTEL = ["civilian", "army", "navy", "air"]
 
 
 def numbers(tag, block):
@@ -35,6 +40,18 @@ def numbers(tag, block):
     for k in BLOCK_NUMBERS:
         m = re.search(rf"^\t\t{k}=(\S+)", block, re.M)
         out[k] = m.group(1) if m else ""
+    return out
+
+
+def intel(tag):
+    """[(target tag, civilian, army, navy, air)] for every other existing country (value texts)."""
+    lines = query(f'every_country = {{ limit = {{ exists = yes NOT = {{ tag = {tag} }} }} {tag} = {{ log = "[PREV.GetTag]'
+                  + "".join(f"|[?{k}_intel@PREV]" for k in INTEL) + '" } }')
+    out = []
+    for line in lines:
+        p = line.strip().split("|")
+        if len(p) == 1 + len(INTEL):
+            out.append(tuple(p))
     return out
 
 
@@ -65,6 +82,7 @@ class CountryLog:
         self.f_num = self._open("country.tsv", "date\t" + "\t".join(VARIABLES + BLOCK_NUMBERS))
         self.f_tpl = self._open("templates.tsv", "date\tid\tname\tbattalions\tsupport")
         self.f_eq = self._open("equipment.tsv", "id\tname\ttype\tmodules")
+        self.f_intel = self._open("intel.tsv", "date\ttarget\t" + "\t".join(INTEL))
         self.templates, self.equipment = {}, set()
 
     def _open(self, name, header):
@@ -85,6 +103,8 @@ class CountryLog:
             g.write(block)
         n = numbers(self.tag, block)
         self.f_num.write(day + "\t" + "\t".join(n[k] for k in VARIABLES + BLOCK_NUMBERS) + "\n")
+        for row in intel(self.tag):
+            self.f_intel.write(day + "\t" + "\t".join(row) + "\n")
         for tid, a in _addresses(52, handles(block, 52)).items():
             self.reader._templates.pop(a, None)   # templates can be edited: read them again each day
             name, bats, sup = self.reader.template(a)
@@ -97,10 +117,10 @@ class CountryLog:
             v = self.reader.variant(a)
             self.f_eq.write(f"{eid}\t{v.name}\t{v.type}\t{','.join(v.modules)}\n")
             self.equipment.add(eid)
-        for f in (self.f_num, self.f_tpl, self.f_eq):
+        for f in (self.f_num, self.f_tpl, self.f_eq, self.f_intel):
             f.flush()
         return True
 
     def close(self):
-        for f in (self.f_num, self.f_tpl, self.f_eq):
+        for f in (self.f_num, self.f_tpl, self.f_eq, self.f_intel):
             f.close()
