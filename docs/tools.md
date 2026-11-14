@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -99,7 +99,7 @@ first step at war, or `--war-start` when the run began after it).
 What a recording holds, and what it doesn't:
 
 - Decisions, as tables: the commands, events answered, division templates, equipment designs (modules, the design
-  they're based on), production lines (design, factories, priority, MIO), MIO traits and market purchases and listings. A row says what was chosen,
+  they're based on), production lines (design, factories, priority, MIO), MIO traits, market purchases and listings, and doctrines. A row says what was chosen,
   not what it does: a trait is its token, a design its modules.
 - Results, as raw state: the recorded country's whole save-format block each day (`country/DAY.txt.gz`): output and
   efficiency of each production line, stockpile, MIO funds and size, research, manpower... Only a few headline
@@ -107,7 +107,7 @@ What a recording holds, and what it doesn't:
 - Not recorded: what a choice means (a trait's bonus, a design's stats and cost). These follow from the game files
   (`common/military_industrial_organization`, equipment modules, localisation for the in-game names) and can be
   decoded afterwards. Other countries' state is also not kept: their decisions are logged (lines, designs,
-  templates, market contracts; MIOs and sale listings weekly) but not their output or stockpiles.
+  templates, market contracts, doctrines; MIOs and sale listings weekly) but not their output or stockpiles.
 
 ### `cmdrec.py`
 
@@ -184,6 +184,15 @@ the amount and taking it back are each a `CMarketStockpileEquipmentTransferComma
 id and amount in the last column, `D+0x48` to the market and `D+0x88` back; needs a bridge with `deref` paths), and
 buying is a `CDiplomaticActionCommand` with `P+0x28=CRequestEquipmentPurchaseAction@NInternationalMarket`.
 `--no-market` turns it off.
+
+Doctrines (`hoi4ai/doctrinerec.py`): `doctrines.tsv` gets every country's grand doctrine per folder and the
+subdoctrine on each track, at the start and then as each is `new`, `changed` or `removed`: date, change, country,
+folder (`land`, `naval`, `air`, `special_forces`), track (empty for the grand doctrine, else `infantry`, `armor`...),
+doctrine and was (the game's keys, e.g. `superior_firepower`, `defensive_postures`) and the track's mastery. They are
+read from memory (`CCountryDoctrineStatus@NDoctrines`; the save-format block has no doctrines) each in-game day and
+after a doctrine command; finding the objects is a memory scan (~10 s) at the start and every 7 days. In the record,
+picking is `CUnlockGrandDoctrineCommand@NDoctrines` (template pointer +0x28, country +0x30) and
+`CUnlockSubDoctrineCommand@NDoctrines` (folder +0x28, subdoctrine +0x30, country +0x3c). `--no-doctrines` turns it off.
 
 ### `analyze_cmdrec.py`
 
