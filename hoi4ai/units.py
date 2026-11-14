@@ -41,3 +41,14 @@ def load(files=None):
             cats = pdx.values(pdx.get(body, "categories", []) or [])
             out[unit_name] = SubUnitType(unit_name, pdx.get(body, "group"), pdx.get(body, "transport"), speed, cats)
     return out
+
+
+def order(files=None):
+    """Every sub-unit's name in the game's order (common/units files by name, units in file order): a save's
+    sub_units index N is order()[N - 1]."""
+    files = files or GameFiles()
+    out = []
+    for name, path in sorted(files.listdir("common/units", ".txt").items()):
+        tree = pdx.parse(open(path, encoding="utf-8-sig", errors="replace").read())
+        out += [u for u, _, body in pdx.get(tree, "sub_units", []) or [] if isinstance(body, list)]
+    return out

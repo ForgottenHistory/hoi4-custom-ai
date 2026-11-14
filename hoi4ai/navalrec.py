@@ -2,29 +2,32 @@
 
 NavalLog(path, admiral_path, names, tags, others).step(date, lines) writes to naval.tsv:
   date  change  country  task_force  name  fleet  ships  mission  regions  engagement  repair  exercise  home_base
-  admiral  location  was
-task_force the task force's id (handle 51), fleet its fleet (handle 61 id and name, e.g. "1 Kriegsmarine"), ships how
+  admiral  auto_reinforce  auto_split  composition  detached  location  was
+task_force the task force's id ("51:ID" for the starting ones, "61:ID" for ones made by split, balance or detach), fleet its fleet (handle 61 id and name, e.g. "1 Kriegsmarine"), ships how
 many of each ship type it has (e.g. "destroyer:6,light_cruiser:2"), mission hold / patrol / strike_force /
 convoy_raiding / convoy_escort / mines_planting / mines_sweeping / training / reserve_fleet / naval_invasion_support,
 regions the strategic regions of the fleet's mission (comma separated), engagement and repair the task force's
 settings (do_not_engage / low_risk / medium_risk / high_risk / always; never / low / medium / high: when it returns
 for repairs), exercise until_max_xp when training stops at max experience (else empty), home_base the fleet's home
 port (a province, e.g. 241 Wilhelmshaven; automated_homebase=yes stays after the player picks one), admiral the fleet's admiral (handle 4713 id
-and name), location the province it is in (written, not compared). change: start (the first read of a country), new
-(a task force made, split off, or deployed), changed, removed (merged, or sunk). was: what changed, as field=old.
+and name), auto_reinforce and auto_split yes when on, composition the composition editor's requirements (e.g. "submarine:0";
+sub_units N is units.order()[N - 1], roles dropped), detached the activity and task force a detached group belongs
+to (e.g. "reinforcing 61:682"), location the province it is in (written, not compared). change: start (the first read of a country), new
+(a task force made, split off, or deployed), changed, removed (merged, deleted, or sunk). was: what changed, as field=old.
 
 and to admirals.tsv:
   date  change  country  admiral  name  skill  attack  defense  maneuvering  coordination  traits  fleet  was
 traits the admiral's traits in the game's order, fleet the fleet it commands (id and name, empty when unassigned).
 
 Reads at the first call and each new in-game day: TAGS (the recorded countries) each time, OTHERS() (a callable, e.g.
-MioLog's producing countries) every FULL_DAYS days, and TAGS at once after a naval command in the record LINES (the
-owner column of these is empty). Admirals are found with a memory scan (CNavyLeader objects) at the first read and
+MioLog's producing countries) every FULL_DAYS days, and TAGS at once after a naval command in the record LINES whose
+owner column is "-" (the player's; the AI's have an owner offset). Admirals are found with a memory scan (CNavyLeader objects) at the first read and
 every RESCAN_DAYS days.
 
 Read from a country's save-format block: fleet={ id={ id=N type=61 } name leader={ id=A type=4713 } task_force={
-id={ id=T type=51 } name location mission={ mission navy_engagement_rule stop_training_at_max_xp } repair_mode ship={
-definition } } strategic_region={ R... } home_base automated_homebase }. mission 1 patrol, 2 strike force, 3 convoy
+id={ id=T type=51|61 } name location mission={ mission navy_engagement_rule stop_training_at_max_xp } repair_mode ship={
+definition } auto_reinforcement repair_split repair_parent detached_activity ai_taskforce_composition={ requirements={ sub_units
+amount } } } strategic_region={ R... } home_base automated_homebase }. mission 1 patrol, 2 strike force, 3 convoy
 raiding, 7 training seen; the others follow the game's order. navy_engagement_rule 0-4 as the buttons (2 medium
 risk the default), repair_mode 0-3 as the buttons (3 high the default). An admiral: bridge.write 4713 ID (name skill traits
 attack_skill defense_skill maneuvering_skill coordination_skill); its country id at +0x120 of the CNavyLeader.
@@ -41,6 +44,10 @@ The player's commands (in command_record.tsv; the owner column is empty, the AI 
   CSetFleetHomeBaseCommand        fleet 61:ID +0x28, province +0x30
   CSetAsReserveFleetCommand       making a fleet the reserve fleet
   CLearnTraitCommand              admiral 4713:ID +0x28 (as for generals)
+  CSetTaskForceAutoReinforcementCommand  task forces list +0x28, +0x40 int (byte 0 on)
+  CNavyRepairModeCommand also comes with the automatic split button (no other command does)
+  CSetTaskForceCompositionRequirementsCommand  the composition editor
+  CDeleteUnitCommand             task force 61:ID +0x28 (deleting it)
 """
 import os
 import re
@@ -51,23 +58,24 @@ FULL_DAYS = 7
 RESCAN_DAYS = 7
 LEADER = 4713
 HEADER = ("date\tchange\tcountry\ttask_force\tname\tfleet\tships\tmission\tregions\tengagement\trepair\texercise"
-          "\thome_base\tadmiral\tlocation\twas")
+          "\thome_base\tadmiral\tauto_reinforce\tauto_split\tcomposition\tdetached\tlocation\twas")
 FIELDS = ("name", "fleet", "ships", "mission", "regions", "engagement", "repair", "exercise", "home_base", "admiral",
-          "location")
+          "auto_reinforce", "auto_split", "composition", "detached", "location")
 COMPARE = FIELDS[:-1]
 ADMIRAL_HEADER = ("date\tchange\tcountry\tadmiral\tname\tskill\tattack\tdefense\tmaneuvering\tcoordination\ttraits"
                   "\tfleet\twas")
 ADMIRAL_FIELDS = ("name", "skill", "attack", "defense", "maneuvering", "coordination", "traits", "fleet")
 COMMANDS = ("CNavalMissionSetTypeCommand", "CNavalMissionAddRegionCommand", "CNavalMissionMoveCommand",
             "CSetNavyEngagementCommand", "CNavyRepairModeCommand", "CReorganizeShipsCommand", "CMergeNaviesCommand",
-            "CSetFleetLeaderCommand", "CSetFleetHomeBaseCommand", "CSetAsReserveFleetCommand", "CLearnTraitCommand")
+            "CSetFleetLeaderCommand", "CSetFleetHomeBaseCommand", "CSetAsReserveFleetCommand", "CLearnTraitCommand",
+            "CSetTaskForceAutoReinforcementCommand", "CSetTaskForceCompositionRequirementsCommand", "CDeleteUnitCommand")
 MISSIONS = ("hold", "patrol", "strike_force", "convoy_raiding", "convoy_escort", "mines_planting", "mines_sweeping",
             "training", "reserve_fleet", "naval_invasion_support")
 ENGAGEMENTS = ("do_not_engage", "low_risk", "medium_risk", "high_risk", "always")      # navy_engagement_rule
 REPAIRS = ("never", "low", "medium", "high")                                          # repair_mode
 CLASS = "CNavyLeader"
 _FLEET = re.compile(r"\n\t*fleet=\{\s*id=\{ id=(\d+) type=61 \}")
-_TASK = re.compile(r"\n\t*task_force=\{\s*id=\{ id=(\d+) type=51 \}")
+_TASK = re.compile(r"\n\t*task_force=\{\s*id=\{ id=(\d+) type=(51|61) \}")
 
 
 def _block(text, i):
@@ -103,8 +111,27 @@ def _top(blk):
     return "".join(out)
 
 
+_UNITS = []
+
+
+def _units():
+    if not _UNITS:
+        from hoi4ai.units import order
+        _UNITS.extend(order())
+    return _UNITS
+
+
+def composition(tb):
+    """The composition editor's requirements of task force block TB, e.g. "destroyer:6,heavy_cruiser:1"."""
+    i = tb.find("ai_taskforce_composition={")
+    req = _block(tb, tb.find("requirements={", i)) if i >= 0 else ""
+    lists = {k: (re.search(r"\n\t*" + k + r"=\{([^}]*)\}", req) or [None, ""])[1].split()
+             for k in ("sub_units", "amount")}
+    return ",".join(f"{_name([''] + _units(), u)}:{a}" for u, a in zip(lists["sub_units"], lists["amount"]))
+
+
 def task_forces(text):
-    """{task force id: {field: value}} of one save-format country block (admiral: its id only)."""
+    """{task force "type:id": {field: value}} of one save-format country block (admiral: its id only)."""
     out = {}
     for f in _FLEET.finditer(text):
         fb = _block(text, f.start() + 1)
@@ -121,7 +148,11 @@ def task_forces(text):
             for d in re.findall(r"\n\t*definition=(\w+)", tb):
                 ships[d] = ships.get(d, 0) + 1
             mission = _get(mis, "mission")
-            out[int(m.group(1))] = {
+            top = _top(tb)
+            parent = re.search(r"\n\t*repair_parent=\{ id=(\d+) type=(\d+) \}", tb)
+            detached = " ".join(filter(None, (_get(top, "detached_activity"),
+                                              f"{parent.group(2)}:{parent.group(1)}" if parent else "")))
+            out[f"{m.group(2)}:{m.group(1)}"] = {
                 "name": _get(_top(tb), "name"), "fleet": fleet,
                 "ships": ",".join(f"{k}:{v}" for k, v in sorted(ships.items())),
                 "mission": _name(MISSIONS, mission),
@@ -131,7 +162,10 @@ def task_forces(text):
                 "exercise": "until_max_xp" if re.search(r"\n\t*stop_training_at_max_xp=yes", mis) else "",
                 "home_base": _get(own, "home_base"),
                 "admiral": leader.group(1) if leader else "",
-                "location": _get(_top(tb), "location")}
+                "auto_reinforce": "yes" if re.search(r"\n\t*auto_reinforcement=yes", top) else "",
+                "auto_split": "yes" if re.search(r"\n\t*repair_split=yes", top) else "",
+                "composition": composition(tb), "detached": detached,
+                "location": _get(top, "location")}
     return out
 
 
@@ -146,9 +180,9 @@ def admiral(lines):
 
 
 def parse(line):
-    """A record line -> the class of a naval command, or None."""
-    p = line.split("\t", 3)
-    return p[2] if len(p) > 3 and p[2] in COMMANDS else None
+    """A record line -> the class of a player's naval command (owner column "-"), or None."""
+    p = line.split("\t", 4)
+    return p[2] if len(p) > 4 and p[2] in COMMANDS and p[3] == "-" else None
 
 
 class NavalLog:

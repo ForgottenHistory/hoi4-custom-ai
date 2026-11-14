@@ -260,21 +260,25 @@ wings of the listed ones are written to the record by `airrec.install_rules()` (
 with `bridge.write`. `--no-air` turns it off.
 
 Navies (`hoi4ai/navalrec.py`): `naval.tsv` gets each country's task forces at its first read and then each change:
-date, change (`start`, `new`, `changed`, `removed`), country, task_force (handle 51 id), name, fleet (handle 61 id and
+date, change (`start`, `new`, `changed`, `removed`), country, task_force (`51:ID` for the starting ones, `61:ID` for ones made by splitting or balancing), name, fleet (handle 61 id and
 name), ships (count per ship type, e.g. `destroyer:4,heavy_cruiser:2`), mission (`hold`, `patrol`, `strike_force`,
 `convoy_raiding`, ..., `training`), regions (the fleet's mission regions), engagement (`do_not_engage`, `low_risk`,
 `medium_risk`, `high_risk`, `always`), repair (`never`, `low`, `medium`, `high`), exercise (`until_max_xp` when
 training stops at max experience), home_base (province), admiral (handle
-4713 id and name), location (not compared) and was (`field=old`). `admirals.tsv` gets each country's admirals: admiral
+4713 id and name), auto_reinforce and auto_split (`yes` when on), composition (the composition editor's requirements, e.g.
+`submarine:0`, unit names from the save's `sub_units` index into common/units in file order), detached
+(`reinforcing 61:682` for the ships detached from task force 682 to reinforce), location (not compared) and was (`field=old`). `admirals.tsv` gets each country's admirals: admiral
 (handle 4713 id), name, skill, attack, defense, maneuvering, coordination, traits and the fleet they command. Read from
 the country's save-format block (`fleet={ task_force={ mission={ mission navy_engagement_rule } repair_mode ship={
-definition } } strategic_region home_base leader }`); admirals are found with a memory scan for `CNavyLeader` (country id
+definition } auto_reinforcement repair_split repair_parent detached_activity
+ai_taskforce_composition={ requirements={ sub_units amount } } } strategic_region home_base leader }`); admirals are found with a memory scan for `CNavyLeader` (country id
 at +0x120) and read with `bridge.write 4713 ID`. The country's each day, other producing countries' every 7 days, and
-the country's at once after a naval command: `CNavalMissionSetTypeCommand` (task forces +0x28, mission +0x40, stop at
+the country's at once after the player's naval command (owner column `-`): `CNavalMissionSetTypeCommand` (task forces +0x28, mission +0x40, stop at
 max experience +0x41), `CNavalMissionAddRegionCommand` (fleet `61:ID` +0x28, region +0x30), `CNavalMissionMoveCommand`,
 `CSetNavyEngagementCommand` (rule +0x40), `CNavyRepairModeCommand`, `CReorganizeShipsCommand` (split),
 `CMergeNaviesCommand`, `CSetFleetLeaderCommand` (admiral +0x28, fleet +0x30), `CSetFleetHomeBaseCommand` (fleet +0x28,
-province +0x30), `CSetAsReserveFleetCommand` or `CLearnTraitCommand`. `--no-naval` turns it off.
+province +0x30), `CSetAsReserveFleetCommand`, `CLearnTraitCommand`, `CSetTaskForceAutoReinforcementCommand` (task
+forces +0x28), `CSetTaskForceCompositionRequirementsCommand` or `CDeleteUnitCommand` (`61:ID` +0x28). `--no-naval` turns it off.
 
 ### `analyze_cmdrec.py`
 
