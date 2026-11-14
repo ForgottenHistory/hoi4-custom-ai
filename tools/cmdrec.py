@@ -15,6 +15,10 @@ country/DAY.txt.gz, headline numbers to country.tsv, the equipment it names to e
 Events (hoi4ai/eventrec.py): every event any country answers, with the option it picked, to events.tsv.
 Division templates (hoi4ai/templaterec.py): every country's templates at the start, then each one created, edited,
 decommissioned or removed, to division_templates.tsv.
+Equipment designs (hoi4ai/equipmentrec.py): every country's designs at the start, then each new design (with the one
+it's based on) and each made obsolete, to equipment_designs.tsv.
+Production lines (hoi4ai/productionrec.py): every country's military lines at the start, then each line added,
+changed (factories, design, priority, manufacturer) or removed, to production_lines.tsv.
 Analyse with analyze_cmdrec.py.
 """
 import argparse
@@ -23,7 +27,7 @@ import re
 import time
 
 import _bridge  # noqa: F401  (puts the hoi4-bridge client on the path)
-from hoi4ai import countryrec, eventrec, planrec, templaterec
+from hoi4ai import countryrec, equipmentrec, eventrec, planrec, productionrec, templaterec
 from hoi4ai.gamefiles import game_dir
 from hoi4bridge import BridgeError, player_tag, query, send
 
@@ -59,6 +63,8 @@ def main():
     ap.add_argument("--no-plans", action="store_true", help="no battle-plan snapshots (plans.tsv)")
     ap.add_argument("--no-country", action="store_true", help="no daily country state (country/, country.tsv)")
     ap.add_argument("--no-templates", action="store_true", help="no division template log (division_templates.tsv)")
+    ap.add_argument("--no-designs", action="store_true", help="no equipment design log (equipment_designs.tsv)")
+    ap.add_argument("--no-production", action="store_true", help="no production line log (production_lines.tsv)")
     a = ap.parse_args()
 
     try:
@@ -78,6 +84,10 @@ def main():
     events = eventrec.EventLog(record, os.path.join(folder, "events.tsv"))
     templates = None if a.no_templates else templaterec.TemplateLog(os.path.join(folder, "division_templates.tsv"),
                                                                     events.names)
+    designs = None if a.no_designs else equipmentrec.DesignLog(os.path.join(folder, "equipment_designs.tsv"),
+                                                               events.names)
+    production = None if a.no_production else productionrec.ProductionLog(
+        os.path.join(folder, "production_lines.tsv"), events.names)
     plans = None if a.no_plans else planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = None if a.no_country else countryrec.CountryLog(folder, tag)
     send(f"bridge.cmdrec mark player={player}")
@@ -118,6 +128,16 @@ def main():
                         templates.step(d, events.lines)
                     except (OSError, BridgeError) as e:
                         print("templates:", e)
+                if designs:
+                    try:
+                        designs.step(d, events.lines)
+                    except (OSError, BridgeError) as e:
+                        print("designs:", e)
+                if production:
+                    try:
+                        production.step(d, events.lines)
+                    except (OSError, BridgeError) as e:
+                        print("production:", e)
                 if not a.no_snap and day and day != last_day:
                     send(f"bridge.snap {day} 51 {SNAP_FIELDS}")
                     last_day = day
@@ -129,6 +149,10 @@ def main():
         events.step()
         if templates and last:
             templates.step(last, events.lines)
+        if designs and last:
+            designs.step(last, events.lines)
+        if production and last:
+            production.step(last, events.lines)
 
 
 if __name__ == "__main__":

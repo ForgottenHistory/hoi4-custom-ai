@@ -7,7 +7,9 @@ hours it writes every division of the country and its enemies and who controls e
 (hoi4ai/battlerec.py), its battle plans when they changed (plans.tsv,
 hoi4ai/planrec.py), the country's state each day (country/, country.tsv, hoi4ai/countryrec.py), every command the game executes (bridge.cmdrec, with the date stamped in) and the event choices among them
 (events.tsv, hoi4ai/eventrec.py), and every country's division templates as they are created, edited and removed
-(division_templates.tsv, hoi4ai/templaterec.py). It stops a
+(division_templates.tsv, hoi4ai/templaterec.py), every country's equipment designs and the ones made obsolete
+(equipment_designs.tsv, hoi4ai/equipmentrec.py; obsolete needs the record), and every country's production lines as
+they change (production_lines.tsv, hoi4ai/productionrec.py). It stops a
 step after the target capitulates, --war-days after the declaration, or with Ctrl+C. Our own controller records the same way by itself.
 
 Recordings go to recordings/battle_<label>_<TAG>_<time>/.
@@ -19,7 +21,7 @@ import time
 
 import _bridge  # noqa: F401
 from hoi4bridge import BridgeError, BridgeUnavailable, send, trigger
-from hoi4ai import countryrec, eventrec, planrec, templaterec
+from hoi4ai import countryrec, equipmentrec, eventrec, planrec, productionrec, templaterec
 from hoi4ai.battlerec import BattleRecorder
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.live import Provinces
@@ -48,6 +50,8 @@ def main():
     events = None if a.no_cmdrec else eventrec.EventLog(os.path.join(folder, "command_record.tsv"),
                                                         os.path.join(folder, "events.tsv"))
     templates = templaterec.TemplateLog(os.path.join(folder, "division_templates.tsv"), events and events.names)
+    designs = equipmentrec.DesignLog(os.path.join(folder, "equipment_designs.tsv"), events and events.names)
+    production = productionrec.ProductionLog(os.path.join(folder, "production_lines.tsv"), events and events.names)
     plans = planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = countryrec.CountryLog(folder, tag)
     provinces = Provinces()
@@ -96,6 +100,14 @@ def main():
                 templates.step(f"{now:%Y-%m-%d %H:00}", events.lines if events else ())
             except (OSError, BridgeError, BridgeUnavailable) as e:
                 print("templates:", e)
+            try:   # without the record: new designs each day
+                designs.step(f"{now:%Y-%m-%d %H:00}", events.lines if events else ())
+            except (OSError, BridgeError, BridgeUnavailable) as e:
+                print("designs:", e)
+            try:   # without the record: read each day
+                production.step(f"{now:%Y-%m-%d %H:00}", events.lines if events else ())
+            except (OSError, BridgeError, BridgeUnavailable) as e:
+                print("production:", e)
             taken = int(((provinces.owner == ids[target]) & (provinces.controller == ids[tag])).sum())
             print(f"{now:%Y-%m-%d %H:00} war={int(at_war)} divisions={len(divs)} taken={taken}")
             done = capitulated
@@ -112,6 +124,8 @@ def main():
             events.step()
         if last:
             templates.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
+            designs.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
+            production.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
     print("recorded into", folder)
 
 

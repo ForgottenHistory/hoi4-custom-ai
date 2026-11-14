@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -134,6 +134,22 @@ bottom (`infantry,infantry,infantry|infantry,infantry,infantry|...`). The templa
 holds a template command (create, edit in the designer, remove, set obsolete; those lines in `command_record.tsv` say
 who acted), when a new template id turns up (checked each in-game day) and every 7 days, since focuses and events can
 change templates without a command. A full read takes about a second. `--no-templates` turns it off.
+
+Equipment designs (`hoi4ai/equipmentrec.py`): `equipment_designs.tsv` gets every country's designs at the start
+(`start`, about 15 s), then each `new` design with the design it is based on, each design made `obsolete` (or
+`unobsolete`): date, change, id, owner, name, type, modules, based on. A design is never edited: the designer saves a new one, and an "upgrade" keeps the old name (a
+Bf 109 D with cannons is a new id based on the old Bf 109 D, which the player then usually makes obsolete). Existing
+equipment isn't converted. New ids are probed each in-game day and after each design command. The obsolete flag
+isn't readable from the design itself, so only changes made while recording show. `--no-designs` turns it off.
+
+Production lines (`hoi4ai/productionrec.py`): `production_lines.tsv` gets every country's military production lines
+at the start, then each line `new`, `changed` or `removed`: date, change, line id, owner (the design's owner, so a
+licensed design shows the licensor), design id, design name, factories, priority (0 = top of the list),
+manufacturer (military industrial organisation id). A change is adding or taking away factories, switching the
+line to another design, moving it in the list (moving one line shifts the priorities of the lines around it) or
+changing the manufacturer. The lines are read (under a second) after each production command in the record (those
+lines say who acted) and each in-game day, which catches the AI: it changes its lines without commands. Naval lines
+aren't covered yet. `--no-production` turns it off.
 
 ### `analyze_cmdrec.py`
 
