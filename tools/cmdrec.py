@@ -28,7 +28,7 @@ picked or replaced, to doctrines.tsv.
 Officer corps spirits (hoi4ai/spiritrec.py): the army, navy and air spirits of the country each day and of every
 other producing country each week, as they are picked and replaced, to spirits.tsv.
 Logistics (hoi4ai/logisticsrec.py): fuel prioritization (army, air, navy: low / medium / high) and each army's
-motorization priority, of the country each day and of every other producing country each week, as it changes, to logistics.tsv.
+motorization priority and exercises, of the country each day and of every other producing country each week, as it changes, to logistics.tsv.
 Training and deployment (hoi4ai/deploymentrec.py): the deployment orders and the divisions in training under them,
 of the country each day and of every other producing country each week, as they change and deploy, to deployment.tsv.
 Generals (hoi4ai/generalrec.py): the generals and field marshals of the country each day and of every other

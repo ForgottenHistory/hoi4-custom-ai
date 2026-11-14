@@ -1,9 +1,10 @@
-"""Logistics settings: each country's fuel prioritization and each army's motorization priority.
+"""Logistics settings: each country's fuel prioritization and each army's motorization priority and exercises.
 
 LogisticsLog(path, names, tags, others).step(date, lines) writes to logistics.tsv:
   date  change  country  setting  target  value  was
-setting fuel_army / fuel_air / fuel_navy (target empty), or motorization (target the army: its orders group id and
-name, e.g. "409 Army 1"); value low / medium / high, was the value it replaced. change: start (the first read of a
+setting fuel_army / fuel_air / fuel_navy (target empty), motorization or exercise (target the army: its orders group
+id and name, e.g. "409 Army 1"); value low / medium / high (exercise: off / on / until_max_xp, on with "stop at max
+experience": a click starts exercises, a shift-click until max experience), was the value it replaced. change: start (the first read of a
 country), new (an army made later), changed, removed (an army disbanded). Renaming an army shows as removed + new.
 
 Read from a country's save-format block:
@@ -11,6 +12,7 @@ Read from a country's save-format block:
       2 high
   theatres / orders_group { id={ id=N type=53 } name=... motorization_level=L }: L 0 low (the default: no trucks;
       a horse on the button), 1 medium (one truck), 2 high (several trucks). The game has no names for the levels.
+      training=yes while the army exercises, stop_training_at_max_xp=yes with that box ticked (both absent: off)
 Reads at the first call and each new in-game day: TAGS (the recorded countries) each time, OTHERS() (a callable, e.g.
 MioLog's producing countries) every FULL_DAYS days, and the country of every logistics command in the record LINES
 at once.
@@ -18,6 +20,8 @@ at once.
 The player's commands (in command_record.tsv):
   CSetFuelPriorityCommand             country id +0x28, consumer index +0x2c, priority +0x30
   CSetOrderGroupMotorizationCommand   army handle +0x28 (53:ID), level byte +0x30; the country is the owner column
+  COrderSetTrainingCommand            army handle +0x28 (53:ID), exercise byte +0x30, stop at max experience byte
+                                      +0x31; the country is the owner column (the AI uses it too)
 """
 import os
 import re
@@ -27,7 +31,7 @@ from hoi4bridge import send
 FULL_DAYS = 7
 HEADER = "date\tchange\tcountry\tsetting\ttarget\tvalue\twas"
 COMMANDS = {"CSetFuelPriorityCommand": 0x28,           # class -> offset of its country id (None: the owner column)
-            "CSetOrderGroupMotorizationCommand": None}
+            "CSetOrderGroupMotorizationCommand": None, "COrderSetTrainingCommand": None}
 FUEL_CONSUMERS = ("army", "air", "navy")
 LEVELS = ("low", "medium", "high")
 _FUEL = re.compile(r"fuel_consumer_data=\{\s*index=(\d+)\s*priority=(\d+)")
@@ -70,9 +74,12 @@ def settings(text):
         for idx, pri in _FUEL.findall(_block(text, i)):
             out[("fuel_" + _name(FUEL_CONSUMERS, idx), "")] = _name(LEVELS, pri)
     for m in _GROUP.finditer(text):
-        lvl = re.search(r"\n\t*motorization_level=(\d+)", _block(text, m.start()))
+        blk, army = _block(text, m.start()), f"{m.group(1)} {m.group(2)}"
+        lvl = re.search(r"\n\t*motorization_level=(\d+)", blk)
         if lvl:
-            out[("motorization", f"{m.group(1)} {m.group(2)}")] = _name(LEVELS, lvl.group(1))
+            out[("motorization", army)] = _name(LEVELS, lvl.group(1))
+            out[("exercise", army)] = ("off" if not re.search(r"\n\t*training=yes", blk) else
+                                       "until_max_xp" if re.search(r"\n\t*stop_training_at_max_xp=yes", blk) else "on")
     return out
 
 

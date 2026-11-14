@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), fuel prioritization and army motorization (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), fuel prioritization, army motorization and exercises (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -99,7 +99,7 @@ first step at war, or `--war-start` when the run began after it).
 What a recording holds, and what it doesn't:
 
 - Decisions, as tables: the commands, events answered, division templates, equipment designs (modules, the design
-  they're based on), production lines (design, factories, priority, MIO), MIO traits, market purchases and listings, doctrines, officer corps spirits, fuel prioritization and army motorization. A row says what was chosen,
+  they're based on), production lines (design, factories, priority, MIO), MIO traits, market purchases and listings, doctrines, officer corps spirits, fuel prioritization, army motorization and exercises. A row says what was chosen,
   not what it does: a trait is its token, a design its modules.
 - Results, as raw state: the recorded country's whole save-format block each day (`country/DAY.txt.gz`): output and
   efficiency of each production line, stockpile, MIO funds and size, research, manpower... Only a few headline
@@ -204,14 +204,17 @@ a slot is `CAddIdeaCommand` (country +0x28, `CIdea*` +0x30, its name at +0x18) a
 `CReplaceIdeaCommand` (country +0x28, old +0x30, new +0x38). `--no-spirits` turns it off.
 
 Logistics (`hoi4ai/logisticsrec.py`): `logistics.tsv` gets each country's fuel prioritization and each army's
-motorization priority at its first read and then each change: date, change (`start`, `new`, `changed`, `removed`),
-country, setting (`fuel_army`, `fuel_air`, `fuel_navy`, `motorization`), target (the army's orders group id and name,
-e.g. `409 Army 1`), value (`low`, `medium`, `high`) and was. Read from the save-format block: `fuel_status`
+motorization priority and exercises at its first read and then each change: date, change (`start`, `new`, `changed`, `removed`),
+country, setting (`fuel_army`, `fuel_air`, `fuel_navy`, `motorization`, `exercise`), target (the army's orders group id and name,
+e.g. `409 Army 1`), value (`low`, `medium`, `high`; exercise `off`, `on`,
+`until_max_xp`: started with a shift-click) and was. Read from the save-format block: `fuel_status`
 (`fuel_consumer_data` index 0 army, 1 air, 2 navy; priority 0 low, 1 medium, 2 high) and each `orders_group`'s
-`motorization_level` (0 low: no trucks, the horse icon; 1 medium: one truck; 2 high: several trucks); the country's
+`motorization_level` (0 low: no trucks, the horse icon; 1 medium: one truck; 2 high: several trucks) and
+`training=yes` / `stop_training_at_max_xp=yes` (exercising; stopping at max experience); the country's
 each day, other producing countries' every 7 days, and a country's at once after a logistics command for it:
 `CSetFuelPriorityCommand` (country +0x28, index +0x2c, priority +0x30) or `CSetOrderGroupMotorizationCommand` (army
-handle `53:ID` at +0x28, level byte +0x30). `--no-logistics` turns it off.
+handle `53:ID` at +0x28, level byte +0x30) or `COrderSetTrainingCommand` (army `53:ID` +0x28, exercise byte
++0x30, stop at max experience byte +0x31). `--no-logistics` turns it off.
 
 Training and deployment (`hoi4ai/deploymentrec.py`): `deployment.tsv` gets each country's deployment orders and the
 divisions in training under them at its first read and then each change: date, change (`start`, `new`, `changed`,

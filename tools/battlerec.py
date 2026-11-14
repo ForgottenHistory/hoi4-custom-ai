@@ -12,7 +12,7 @@ hoi4ai/planrec.py), the country's state each day (country/, country.tsv, hoi4ai/
 they change (production_lines.tsv, hoi4ai/productionrec.py), MIO sizes, points and traits (mios.tsv,
 hoi4ai/miorec.py), market contracts and listings (market.tsv, hoi4ai/marketrec.py), every country's doctrines
 (doctrines.tsv, hoi4ai/doctrinerec.py), officer corps spirits (spirits.tsv, hoi4ai/spiritrec.py),
-fuel prioritization and army motorization (logistics.tsv, hoi4ai/logisticsrec.py), training and deployment
+fuel prioritization, army motorization and exercises (logistics.tsv, hoi4ai/logisticsrec.py), training and deployment
 (deployment.tsv, hoi4ai/deploymentrec.py), and generals (generals.tsv, hoi4ai/generalrec.py). It stops a
 step after the target capitulates, --war-days after the declaration, or with Ctrl+C. Our own controller records the same way by itself.
 
