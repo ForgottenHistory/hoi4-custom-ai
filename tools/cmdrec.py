@@ -33,6 +33,8 @@ Training and deployment (hoi4ai/deploymentrec.py): the deployment orders and the
 of the country each day and of every other producing country each week, as they change and deploy, to deployment.tsv.
 Generals (hoi4ai/generalrec.py): the generals and field marshals of the country each day and of every other
 producing country each week (skills, traits, the army they command), as they change, to generals.tsv.
+Air wings (hoi4ai/airrec.py): the air wings of the country each day and of every other producing country each week
+(air base, mission, region, day or night, planes), as they change, to air.tsv.
 Analyse with analyze_cmdrec.py.
 """
 import argparse
@@ -41,7 +43,7 @@ import re
 import time
 
 import _bridge  # noqa: F401  (puts the hoi4-bridge client on the path)
-from hoi4ai import countryrec, deploymentrec, doctrinerec, equipmentrec, eventrec, generalrec, logisticsrec, marketrec, miorec, planrec, productionrec, spiritrec, templaterec
+from hoi4ai import airrec, countryrec, deploymentrec, doctrinerec, equipmentrec, eventrec, generalrec, logisticsrec, marketrec, miorec, planrec, productionrec, spiritrec, templaterec
 from hoi4ai.gamefiles import game_dir
 from hoi4bridge import BridgeError, player_tag, query, send
 
@@ -86,6 +88,7 @@ def main():
     ap.add_argument("--no-logistics", action="store_true", help="no logistics settings log (logistics.tsv)")
     ap.add_argument("--no-deployment", action="store_true", help="no training and deployment log (deployment.tsv)")
     ap.add_argument("--no-generals", action="store_true", help="no generals log (generals.tsv)")
+    ap.add_argument("--no-air", action="store_true", help="no air wing log (air.tsv)")
     a = ap.parse_args()
 
     try:
@@ -98,6 +101,8 @@ def main():
     if a.skip:
         print(send("bridge.cmdrec skip " + " ".join(a.skip))[0])
     planrec.install_rules()
+    if not a.no_air and not airrec.install_rules():
+        print("this bridge can't record the wings of an air command (no `cmdrec list`)")
     if not eventrec.install_rules():
         print("this bridge can't record event options (no `cmdrec field`): events.tsv will have no option")
     if not a.no_market and not marketrec.install_rules():
@@ -124,6 +129,8 @@ def main():
         os.path.join(folder, "deployment.tsv"), events.names, [tag], lambda: mios.others if mios else ())
     generals = None if a.no_generals else generalrec.GeneralLog(
         os.path.join(folder, "generals.tsv"), events.names, [tag], lambda: mios.others if mios else ())
+    air = None if a.no_air else airrec.AirLog(
+        os.path.join(folder, "air.tsv"), events.names, [tag], lambda: mios.others if mios else ())
     plans = None if a.no_plans else planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = None if a.no_country else countryrec.CountryLog(folder, tag)
     send(f"bridge.cmdrec mark player={player}")
@@ -209,6 +216,11 @@ def main():
                         generals.step(d, events.lines)
                     except (OSError, BridgeError) as e:
                         print("generals:", e)
+                if air:
+                    try:
+                        air.step(d, events.lines)
+                    except (OSError, BridgeError) as e:
+                        print("air:", e)
                 if not a.no_snap and day and day != last_day:
                     send(f"bridge.snap {day} 51 {SNAP_FIELDS}")
                     last_day = day
@@ -236,6 +248,8 @@ def main():
             deployment.step(last, events.lines)
         if generals and last:
             generals.step(last, events.lines)
+        if air and last:
+            air.step(last, events.lines)
 
 
 if __name__ == "__main__":

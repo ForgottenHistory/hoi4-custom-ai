@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), fuel prioritization, army motorization and exercises (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), fuel prioritization, army motorization and exercises (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), air wings (`air.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -99,7 +99,7 @@ first step at war, or `--war-start` when the run began after it).
 What a recording holds, and what it doesn't:
 
 - Decisions, as tables: the commands, events answered, division templates, equipment designs (modules, the design
-  they're based on), production lines (design, factories, priority, MIO), MIO traits, market purchases and listings, doctrines, officer corps spirits, fuel prioritization, army motorization and exercises. A row says what was chosen,
+  they're based on), production lines (design, factories, priority, MIO), MIO traits, market purchases and listings, doctrines, officer corps spirits, fuel prioritization, army motorization and exercises, generals, air wings (base, mission). A row says what was chosen,
   not what it does: a trait is its token, a design its modules.
 - Results, as raw state: the recorded country's whole save-format block each day (`country/DAY.txt.gz`): output and
   efficiency of each production line, stockpile, MIO funds and size, research, manpower... Only a few headline
@@ -242,6 +242,22 @@ every 7 days, and a country's at once after `CSetArmyLeaderCommand` (leader `471
 `CPromoteUnitLeaderCommand`, `CLearnTraitCommand` (leader +0x28, trait +0x30), `CUpgradeDivisionOfficerCommand`
 (recruiting: Officers, Promote; division `51:ID` +0x28; a new scan finds the new general) or `CCreateUnitLeaderCommand`.
 `--no-generals` turns it off.
+
+Air wings (`hoi4ai/airrec.py`): `air.tsv` gets each country's air wings at its first read and then each change: date,
+change (`start`, `new`, `changed`, `removed`), country, wing (handle 69 id), name, base (air base, handle 65 id), state
+(of the base), equipment (the plane design, handle 70 id), planes, mission (`none`, `air_superiority`, `cas`,
+`interception`, `strategic_bombing`, `training`, ...: the bits of the game's mission mask), region (the mission's
+strategic region), period (`day`, `night`, `day_and_night`), experience and was (`field=old`; planes and experience
+aren't compared). Read with `bridge.write 69 ID` for every wing (the wing as the game saves it: `count`, `experience`,
+`mission={ type period strategic_region }`, `tag`, `equipment`, `name`), the base from memory (the wing's
+`CAirWingPool` at +0x28 of `bridge.object 69 ID`, the base handle `65:ID` at +0x18 of the pool) and its state with
+`bridge.write 65 ID`. The country's each day, other producing countries' every 7 days, and the country's at once after
+an air command on its wings: `CStratAirSetMissionCommand` (wings +0x28, mission mask +0x40, on +0x44),
+`CStratAirEnableMissionCommand`, `CStratAirDayNightCommand` (wing `69:ID` +0x28, period +0x30),
+`CStratAirTransferCommand` (wing +0x28, base `65:ID` +0x30), `CStratAirSplitCommand` (wing +0x28, planes +0x30),
+`CStratAirConsolidateCommand` (merge), `CDeleteAirWingCommand` (disband) or `CDeployAirWingCommand` (base +0x30); the
+wings of the listed ones are written to the record by `airrec.install_rules()` (`bridge.cmdrec list`). Needs a bridge
+with `bridge.write`. `--no-air` turns it off.
 
 ### `analyze_cmdrec.py`
 
