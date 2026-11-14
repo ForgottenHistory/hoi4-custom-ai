@@ -21,6 +21,8 @@ Production lines (hoi4ai/productionrec.py): every country's military lines at th
 changed (factories, design, priority, MIO assigned or removed) or removed, to production_lines.tsv.
 MIOs (hoi4ai/miorec.py): size, trait points, funds and unlocked traits of the country's MIOs each day and every
 other producing country's each week, to mios.tsv (picking a trait runs no command, so this is its only record).
+Market (hoi4ai/marketrec.py): every purchase contract between any two countries (seller, buyer, designs, amounts,
+factories, cost) and the equipment the country has up for sale, as they appear, change and end, to market.tsv.
 Analyse with analyze_cmdrec.py.
 """
 import argparse
@@ -29,7 +31,7 @@ import re
 import time
 
 import _bridge  # noqa: F401  (puts the hoi4-bridge client on the path)
-from hoi4ai import countryrec, equipmentrec, eventrec, miorec, planrec, productionrec, templaterec
+from hoi4ai import countryrec, equipmentrec, eventrec, marketrec, miorec, planrec, productionrec, templaterec
 from hoi4ai.gamefiles import game_dir
 from hoi4bridge import BridgeError, player_tag, query, send
 
@@ -68,6 +70,7 @@ def main():
     ap.add_argument("--no-designs", action="store_true", help="no equipment design log (equipment_designs.tsv)")
     ap.add_argument("--no-production", action="store_true", help="no production line log (production_lines.tsv)")
     ap.add_argument("--no-mios", action="store_true", help="no MIO log (mios.tsv)")
+    ap.add_argument("--no-market", action="store_true", help="no market log (market.tsv)")
     a = ap.parse_args()
 
     try:
@@ -82,6 +85,8 @@ def main():
     planrec.install_rules()
     if not eventrec.install_rules():
         print("this bridge can't record event options (no `cmdrec field`): events.tsv will have no option")
+    if not a.no_market and not marketrec.install_rules():
+        print("this bridge can't record what a market listing holds (no `cmdrec deref`)")
     record = os.path.join(folder, "command_record.tsv")
     print(send("bridge.cmdrec on " + record)[0])
     events = eventrec.EventLog(record, os.path.join(folder, "events.tsv"))
@@ -92,6 +97,8 @@ def main():
     production = None if a.no_production else productionrec.ProductionLog(
         os.path.join(folder, "production_lines.tsv"), events.names)
     mios = None if a.no_mios else miorec.MioLog(os.path.join(folder, "mios.tsv"), [tag])
+    market = None if a.no_market else marketrec.MarketLog(os.path.join(folder, "market.tsv"), events.names, [tag],
+                                                          lambda: mios.others if mios else ())
     plans = None if a.no_plans else planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = None if a.no_country else countryrec.CountryLog(folder, tag)
     send(f"bridge.cmdrec mark player={player}")
@@ -147,6 +154,11 @@ def main():
                         mios.step(d)
                     except (OSError, BridgeError) as e:
                         print("mios:", e)
+                if market:
+                    try:
+                        market.step(d, events.lines)
+                    except (OSError, BridgeError) as e:
+                        print("market:", e)
                 if not a.no_snap and day and day != last_day:
                     send(f"bridge.snap {day} 51 {SNAP_FIELDS}")
                     last_day = day
@@ -162,6 +174,8 @@ def main():
             designs.step(last, events.lines)
         if production and last:
             production.step(last, events.lines)
+        if market and last:
+            market.step(last, events.lines)
 
 
 if __name__ == "__main__":
