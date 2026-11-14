@@ -122,7 +122,10 @@ def _string(proc, a):
     if not 0 <= n < 512:
         return ""
     raw = b[:n] if cap < 16 else proc.read(struct.unpack_from("<Q", b, 0)[0], n)
-    return (raw or b"").decode("utf-8", errors="replace")
+    try:
+        return (raw or b"").decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("cp1252", errors="replace")   # the game's own names (template names) are often cp1252
 
 
 def _vector(proc, a, stride, limit=64):

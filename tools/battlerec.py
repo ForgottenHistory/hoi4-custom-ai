@@ -5,7 +5,7 @@
 Start the game (play the country, or `observe` to let the game's AI fight), then run this. Every --hours in-game
 hours it writes every division of the country and its enemies and who controls each province
 (hoi4ai/battlerec.py), its battle plans when they changed (plans.tsv,
-hoi4ai/planrec.py), and every command the game executes (bridge.cmdrec, with the date stamped in). It stops a
+hoi4ai/planrec.py), the country's state each day (country/, country.tsv, hoi4ai/countryrec.py), and every command the game executes (bridge.cmdrec, with the date stamped in). It stops a
 step after the target capitulates, --war-days after the declaration, or with Ctrl+C. Our own controller records the same way by itself.
 
 Recordings go to recordings/battle_<label>_<TAG>_<time>/.
@@ -17,7 +17,7 @@ import time
 
 import _bridge  # noqa: F401
 from hoi4bridge import BridgeError, BridgeUnavailable, send, trigger
-from hoi4ai import planrec
+from hoi4ai import countryrec, planrec
 from hoi4ai.battlerec import BattleRecorder
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.live import Provinces
@@ -43,6 +43,7 @@ def main():
         planrec.install_rules()
         print(send("bridge.cmdrec on " + os.path.join(folder, "command_record.tsv"))[0])
     plans = planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
+    country = countryrec.CountryLog(folder, tag)
     provinces = Provinces()
     snap = Snapshotter(os.path.join(REPO, ".cache", "battlerec_snap.tsv"))
     print(f"recording {tag} against {target} every {a.hours} in-game hours into {folder} (Ctrl+C stops)")
@@ -75,6 +76,10 @@ def main():
                 plans.step(f"{now:%Y-%m-%d %H:00}")
             except (OSError, BridgeError, BridgeUnavailable) as e:
                 print("plans:", e)
+            try:
+                country.step(f"{now:%Y-%m-%d}")
+            except (OSError, BridgeError, BridgeUnavailable, RuntimeError) as e:
+                print("country:", e)
             if not a.no_cmdrec:
                 send(f"bridge.cmdrec mark date={now:%Y-%m-%d %H:00}")
             taken = int(((provinces.owner == ids[target]) & (provinces.controller == ids[tag])).sum())

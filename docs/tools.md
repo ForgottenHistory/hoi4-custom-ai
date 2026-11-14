@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -109,6 +109,12 @@ Battle plans: the record also holds the lists behind battle-plan commands (divis
 fortification provinces), and each in-game hour the country's lines are read from memory into `plans.tsv` when they
 changed: army, cohesion, kind, line id, parent line, executing, provinces, border pairs, source (a naval invasion's port; its provinces are then the targets). `hoi4ai/planrec.py` has the
 layouts and `decode()` for each battle-plan command. `--no-plans` turns it off.
+
+Country state (`hoi4ai/countryrec.py`): each in-game day the country's whole save-format block (`bridge.country`:
+production lines, stockpile, research, politics, focus, training queue, divisions) goes to `country/DAY.txt.gz`,
+headline numbers (political power, manpower, factories, fuel, experience, stability, war support) to `country.tsv`,
+and the division templates and equipment variants the block names by id to `templates.tsv` (when one appears or
+changes) and `equipment.tsv`. `--no-country` turns it off.
 
 ### `analyze_cmdrec.py`
 
