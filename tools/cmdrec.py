@@ -11,11 +11,10 @@ unit_snapshots.tsv: owner, province, order, organisation candidates, strength, t
 Battle plans: the record also holds the lists behind the battle-plan commands (hoi4ai/planrec.py rules), and each
 in-game hour the player's (or --tag's) lines are read from memory and written to plans.tsv when they changed.
 Country state (hoi4ai/countryrec.py): each in-game day the country's whole save-format block goes to
-country/DAY.txt.gz, headline numbers to country.tsv, the templates and equipment it names to templates.tsv and
-equipment.tsv, and its intel over every other country (the fog of war) to intel.tsv.
+country/DAY.txt.gz, headline numbers to country.tsv, the equipment it names to equipment.tsv, and its intel over every other country (the fog of war) to intel.tsv.
 Events (hoi4ai/eventrec.py): every event any country answers, with the option it picked, to events.tsv.
 Division templates (hoi4ai/templaterec.py): every country's templates at the start, then each one created, edited,
-or removed, to division_templates.tsv.
+decommissioned or removed, to division_templates.tsv.
 Analyse with analyze_cmdrec.py.
 """
 import argparse

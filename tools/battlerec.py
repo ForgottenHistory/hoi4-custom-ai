@@ -47,8 +47,7 @@ def main():
         print(send("bridge.cmdrec on " + os.path.join(folder, "command_record.tsv"))[0])
     events = None if a.no_cmdrec else eventrec.EventLog(os.path.join(folder, "command_record.tsv"),
                                                         os.path.join(folder, "events.tsv"))
-    templates = None if a.no_cmdrec else templaterec.TemplateLog(os.path.join(folder, "division_templates.tsv"),
-                                                                 events.names)
+    templates = templaterec.TemplateLog(os.path.join(folder, "division_templates.tsv"), events and events.names)
     plans = planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = countryrec.CountryLog(folder, tag)
     provinces = Provinces()
@@ -93,10 +92,10 @@ def main():
                     events.step()
                 except (OSError, BridgeError, BridgeUnavailable) as e:
                     print("events:", e)
-                try:
-                    templates.step(f"{now:%Y-%m-%d %H:00}", events.lines)
-                except (OSError, BridgeError, BridgeUnavailable) as e:
-                    print("templates:", e)
+            try:   # without the record: new template ids each day and a full read every 7 days
+                templates.step(f"{now:%Y-%m-%d %H:00}", events.lines if events else ())
+            except (OSError, BridgeError, BridgeUnavailable) as e:
+                print("templates:", e)
             taken = int(((provinces.owner == ids[target]) & (provinces.controller == ids[tag])).sum())
             print(f"{now:%Y-%m-%d %H:00} war={int(at_war)} divisions={len(divs)} taken={taken}")
             done = capitulated
@@ -111,8 +110,8 @@ def main():
         if not a.no_cmdrec:
             print(send("bridge.cmdrec off")[0])
             events.step()
-            if last:
-                templates.step(f"{last:%Y-%m-%d %H:00}", events.lines)
+        if last:
+            templates.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
     print("recorded into", folder)
 
 

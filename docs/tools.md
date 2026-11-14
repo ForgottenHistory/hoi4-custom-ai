@@ -113,8 +113,8 @@ layouts and `decode()` for each battle-plan command. `--no-plans` turns it off.
 Country state (`hoi4ai/countryrec.py`): each in-game day the country's whole save-format block (`bridge.country`:
 production lines, stockpile, research, politics, focus, training queue, divisions) goes to `country/DAY.txt.gz`,
 headline numbers (political power, manpower, factories, fuel, experience, stability, war support) to `country.tsv`,
-and the division templates and equipment variants the block names by id to `templates.tsv` (when one appears or
-changes) and `equipment.tsv`. `intel.tsv` holds the country's intel (civilian, army, navy, air, 0-100) over every
+and the equipment variants the block names by id to `equipment.tsv` (the template ids are in
+`division_templates.tsv`). `intel.tsv` holds the country's intel (civilian, army, navy, air, 0-100) over every
 other country each day: the player's fog of war, since what the map shows of a country's army follows army intel
 (division counts "?" below 10%, then approximate; template details from 30%, exact from 80%). `--no-country` turns it
 off.
@@ -128,7 +128,8 @@ Hidden events run no command and are not recorded. `tools/events.py RECORD [OUT]
 
 Division templates (`hoi4ai/templaterec.py`): every country's templates go to `division_templates.tsv`, first all of
 them (`start`), then each one `new`, `changed` (an edit keeps the template's id) or `removed`: date, change, id,
-owner, name, battalions, support companies. Battalions are the designer's grid, columns separated by `|`, each top to
+owner, name, obsolete (1 once decommissioned with the designer's button: the template stays, but can't be used for
+new divisions), battalions, support companies. Battalions are the designer's grid, columns separated by `|`, each top to
 bottom (`infantry,infantry,infantry|infantry,infantry,infantry|...`). The templates are read again whenever the record
 holds a template command (create, edit in the designer, remove, set obsolete; those lines in `command_record.tsv` say
 who acted), when a new template id turns up (checked each in-game day) and every 7 days, since focuses and events can

@@ -5,15 +5,14 @@ CountryLog(folder, tag).step(day) writes, once per day:
                       (production.equipments), research done, politics, focus, deployment queue, divisions, intel ...)
   country.tsv         a row of headline numbers: VARIABLES (script game variables through bridge.query), then stability
                       and war support from the block
-  templates.tsv       division templates the block names (division_template_id, handle 52): name, battalions,
-                      support companies; written when a template first shows up or changes
   equipment.tsv       equipment variants the block names (handle 70): name, type, modules; written once each
   intel.tsv           the country's intel over every other existing country, 0-100 (negative: their counter-intelligence
                       outweighs it): civilian, army, navy, air. This is the player's fog of war: the map shows what army
                       intel allows (below 10% division counts are "?", then counts with an error range shrinking to
                       70%, template info from 30%, exact templates from 80%: the NIntel ARMY_* defines)
 
-The block refers to templates and equipment by handle ({ id=96 type=70 }); the two tables give those ids names.
+The block refers to templates and equipment by handle ({ id=96 type=70 }); equipment.tsv names the equipment ids,
+division_templates.tsv (hoi4ai/templaterec.py, every country's templates) the template ids.
 """
 import gzip
 import os
@@ -80,10 +79,9 @@ class CountryLog:
         self.proc = Process()
         self.reader = Reader(self.proc)
         self.f_num = self._open("country.tsv", "date\t" + "\t".join(VARIABLES + BLOCK_NUMBERS))
-        self.f_tpl = self._open("templates.tsv", "date\tid\tname\tbattalions\tsupport")
         self.f_eq = self._open("equipment.tsv", "id\tname\ttype\tmodules")
         self.f_intel = self._open("intel.tsv", "date\ttarget\t" + "\t".join(INTEL))
-        self.templates, self.equipment = {}, set()
+        self.equipment = set()
 
     def _open(self, name, header):
         path = os.path.join(self.folder, name)
@@ -105,22 +103,15 @@ class CountryLog:
         self.f_num.write(day + "\t" + "\t".join(n[k] for k in VARIABLES + BLOCK_NUMBERS) + "\n")
         for row in intel(self.tag):
             self.f_intel.write(day + "\t" + "\t".join(row) + "\n")
-        for tid, a in _addresses(52, handles(block, 52)).items():
-            self.reader._templates.pop(a, None)   # templates can be edited: read them again each day
-            name, bats, sup = self.reader.template(a)
-            row = (name, ",".join(bats), ",".join(sup))
-            if self.templates.get(tid) != row:
-                self.templates[tid] = row
-                self.f_tpl.write(f"{day}\t{tid}\t" + "\t".join(row) + "\n")
         new = [i for i in handles(block, 70) if i not in self.equipment]
         for eid, a in _addresses(70, new).items():
             v = self.reader.variant(a)
             self.f_eq.write(f"{eid}\t{v.name}\t{v.type}\t{','.join(v.modules)}\n")
             self.equipment.add(eid)
-        for f in (self.f_num, self.f_tpl, self.f_eq, self.f_intel):
+        for f in (self.f_num, self.f_eq, self.f_intel):
             f.flush()
         return True
 
     def close(self):
-        for f in (self.f_num, self.f_tpl, self.f_eq, self.f_intel):
+        for f in (self.f_num, self.f_eq, self.f_intel):
             f.close()

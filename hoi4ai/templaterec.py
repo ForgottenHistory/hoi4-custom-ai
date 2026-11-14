@@ -4,18 +4,19 @@ TemplateLog(path).step(date, lines) rescans every template (handle 52, ids from 
 when the new record LINES hold a template command, every FULL_DAYS in-game days (effects such as a focus can change
 templates without a command) and when a new id turns up past the highest known (probed each new day, about 0.1 s),
 and writes what differs from the last scan:
-  date  change (start / new / changed / removed)  id  owner  name  battalions  support
+  date  change (start / new / changed / removed)  id  owner  name  obsolete  battalions  support
 battalions are the designer's grid: columns separated by "|", top to bottom, empty slots left out
-("infantry,infantry,infantry|infantry,infantry,infantry|..."); support is the support companies in order.
+("infantry,infantry,infantry|infantry,infantry,infantry|..."); support is the support companies in order; obsolete
+is 1 once the country decommissions the template (the designer's button; it stays, hidden from new divisions).
 
 The commands themselves (in command_record.tsv) say who acted; edits keep the template id:
   CCreateDivisionTemplateCommand       a new template (a whole copy of it embedded at +0x28, owner country at +0x270)
   CUpdateDivisionTemplateCommand       the player's edit in the designer (same layout; the AI doesn't edit)
   CRemoveDivisionTemplateCommand       +0x28 template handle
-  CSetObsoleteDivisionTemplateCommand  +0x28 template handle
+  CSetObsoleteDivisionTemplateCommand  +0x28 template handle, +0x38 the flag (1 = decommission)
 A CReferencedDivisionTemplate (bridge.object 52 ID) has its name at +0x20, its battalion slots at +0x68 (pointer
 array, count +0x74; slot = column * 5 + row; an empty slot points at something that isn't a CSubUnitDefinition),
-support slots at +0x88, owner country id at +0x1ec.
+support slots at +0x88, owner country id at +0x1ec, obsolete flag (byte) at +0x236.
 """
 import os
 import re
@@ -25,7 +26,7 @@ from hoi4bridge import send
 
 CLASSES = ("CCreateDivisionTemplateCommand", "CUpdateDivisionTemplateCommand", "CRemoveDivisionTemplateCommand",
            "CSetObsoleteDivisionTemplateCommand")
-HEADER = "date\tchange\tid\towner\tname\tbattalions\tsupport"
+HEADER = "date\tchange\tid\towner\tname\tobsolete\tbattalions\tsupport"
 ROWS = 5
 FULL_DAYS = 7
 
@@ -79,12 +80,13 @@ class TemplateLog:
         return "|".join(cols)
 
     def scan(self):
-        """{id: (owner tag, name, battalions, support)}."""
+        """{id: (owner tag, name, obsolete, battalions, support)}."""
         from hoi4ai.templates import _string
         out = {}
         for tid, a in _ids_and_addresses().items():
+            flag = self.proc.read(a + 0x236, 1)
             out[tid] = (self.names.tag(self.proc.i32(a + 0x1ec)), _string(self.proc, a + 0x20),
-                        self._slots(a + 0x68, True), self._slots(a + 0x88, False))
+                        str(flag[0]) if flag else "", self._slots(a + 0x68, True), self._slots(a + 0x88, False))
         return out
 
     def step(self, date, lines=()):
