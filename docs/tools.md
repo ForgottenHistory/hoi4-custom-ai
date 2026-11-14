@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), fuel prioritization, army motorization and exercises (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), air wings (`air.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), fuel prioritization, army motorization and exercises (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), air wings (`air.tsv`), task forces and admirals (`naval.tsv`, `admirals.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -99,7 +99,7 @@ first step at war, or `--war-start` when the run began after it).
 What a recording holds, and what it doesn't:
 
 - Decisions, as tables: the commands, events answered, division templates, equipment designs (modules, the design
-  they're based on), production lines (design, factories, priority, MIO), MIO traits, market purchases and listings, doctrines, officer corps spirits, fuel prioritization, army motorization and exercises, generals, air wings (base, mission). A row says what was chosen,
+  they're based on), production lines (design, factories, priority, MIO), MIO traits, market purchases and listings, doctrines, officer corps spirits, fuel prioritization, army motorization and exercises, generals, air wings (base, mission), task forces (mission, regions, engagement, repair) and admirals. A row says what was chosen,
   not what it does: a trait is its token, a design its modules.
 - Results, as raw state: the recorded country's whole save-format block each day (`country/DAY.txt.gz`): output and
   efficiency of each production line, stockpile, MIO funds and size, research, manpower... Only a few headline
@@ -258,6 +258,23 @@ an air command on its wings: `CStratAirSetMissionCommand` (wings +0x28, mission 
 `CStratAirConsolidateCommand` (merge), `CDeleteAirWingCommand` (disband) or `CDeployAirWingCommand` (base +0x30); the
 wings of the listed ones are written to the record by `airrec.install_rules()` (`bridge.cmdrec list`). Needs a bridge
 with `bridge.write`. `--no-air` turns it off.
+
+Navies (`hoi4ai/navalrec.py`): `naval.tsv` gets each country's task forces at its first read and then each change:
+date, change (`start`, `new`, `changed`, `removed`), country, task_force (handle 51 id), name, fleet (handle 61 id and
+name), ships (count per ship type, e.g. `destroyer:4,heavy_cruiser:2`), mission (`hold`, `patrol`, `strike_force`,
+`convoy_raiding`, ..., `training`), regions (the fleet's mission regions), engagement (`do_not_engage`, `low_risk`,
+`medium_risk`, `high_risk`, `always`), repair (`never`, `low`, `medium`, `high`), exercise (`until_max_xp` when
+training stops at max experience), home_base (province), admiral (handle
+4713 id and name), location (not compared) and was (`field=old`). `admirals.tsv` gets each country's admirals: admiral
+(handle 4713 id), name, skill, attack, defense, maneuvering, coordination, traits and the fleet they command. Read from
+the country's save-format block (`fleet={ task_force={ mission={ mission navy_engagement_rule } repair_mode ship={
+definition } } strategic_region home_base leader }`); admirals are found with a memory scan for `CNavyLeader` (country id
+at +0x120) and read with `bridge.write 4713 ID`. The country's each day, other producing countries' every 7 days, and
+the country's at once after a naval command: `CNavalMissionSetTypeCommand` (task forces +0x28, mission +0x40, stop at
+max experience +0x41), `CNavalMissionAddRegionCommand` (fleet `61:ID` +0x28, region +0x30), `CNavalMissionMoveCommand`,
+`CSetNavyEngagementCommand` (rule +0x40), `CNavyRepairModeCommand`, `CReorganizeShipsCommand` (split),
+`CMergeNaviesCommand`, `CSetFleetLeaderCommand` (admiral +0x28, fleet +0x30), `CSetFleetHomeBaseCommand` (fleet +0x28,
+province +0x30), `CSetAsReserveFleetCommand` or `CLearnTraitCommand`. `--no-naval` turns it off.
 
 ### `analyze_cmdrec.py`
 
