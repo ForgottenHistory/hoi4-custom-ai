@@ -29,6 +29,8 @@ Officer corps spirits (hoi4ai/spiritrec.py): the army, navy and air spirits of t
 other producing country each week, as they are picked and replaced, to spirits.tsv.
 Logistics (hoi4ai/logisticsrec.py): fuel prioritization (army, air, navy: low / medium / high) and each army's
 motorization priority, of the country each day and of every other producing country each week, as it changes, to logistics.tsv.
+Training and deployment (hoi4ai/deploymentrec.py): the deployment orders and the divisions in training under them,
+of the country each day and of every other producing country each week, as they change and deploy, to deployment.tsv.
 Analyse with analyze_cmdrec.py.
 """
 import argparse
@@ -37,7 +39,7 @@ import re
 import time
 
 import _bridge  # noqa: F401  (puts the hoi4-bridge client on the path)
-from hoi4ai import countryrec, doctrinerec, equipmentrec, eventrec, logisticsrec, marketrec, miorec, planrec, productionrec, spiritrec, templaterec
+from hoi4ai import countryrec, deploymentrec, doctrinerec, equipmentrec, eventrec, logisticsrec, marketrec, miorec, planrec, productionrec, spiritrec, templaterec
 from hoi4ai.gamefiles import game_dir
 from hoi4bridge import BridgeError, player_tag, query, send
 
@@ -80,6 +82,7 @@ def main():
     ap.add_argument("--no-doctrines", action="store_true", help="no doctrine log (doctrines.tsv)")
     ap.add_argument("--no-spirits", action="store_true", help="no officer corps spirit log (spirits.tsv)")
     ap.add_argument("--no-logistics", action="store_true", help="no logistics settings log (logistics.tsv)")
+    ap.add_argument("--no-deployment", action="store_true", help="no training and deployment log (deployment.tsv)")
     a = ap.parse_args()
 
     try:
@@ -114,6 +117,8 @@ def main():
                                                             lambda: mios.others if mios else ())
     logistics = None if a.no_logistics else logisticsrec.LogisticsLog(
         os.path.join(folder, "logistics.tsv"), events.names, [tag], lambda: mios.others if mios else ())
+    deployment = None if a.no_deployment else deploymentrec.DeploymentLog(
+        os.path.join(folder, "deployment.tsv"), events.names, [tag], lambda: mios.others if mios else ())
     plans = None if a.no_plans else planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = None if a.no_country else countryrec.CountryLog(folder, tag)
     send(f"bridge.cmdrec mark player={player}")
@@ -189,6 +194,11 @@ def main():
                         logistics.step(d, events.lines)
                     except (OSError, BridgeError) as e:
                         print("logistics:", e)
+                if deployment:
+                    try:
+                        deployment.step(d, events.lines)
+                    except (OSError, BridgeError) as e:
+                        print("deployment:", e)
                 if not a.no_snap and day and day != last_day:
                     send(f"bridge.snap {day} 51 {SNAP_FIELDS}")
                     last_day = day
@@ -212,6 +222,8 @@ def main():
             spirits.step(last, events.lines)
         if logistics and last:
             logistics.step(last, events.lines)
+        if deployment and last:
+            deployment.step(last, events.lines)
 
 
 if __name__ == "__main__":

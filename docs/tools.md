@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), fuel prioritization and army motorization (`logistics.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), fuel prioritization and army motorization (`logistics.tsv`), training and deployment (`deployment.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -212,6 +212,20 @@ e.g. `409 Army 1`), value (`low`, `medium`, `high`) and was. Read from the save-
 each day, other producing countries' every 7 days, and a country's at once after a logistics command for it:
 `CSetFuelPriorityCommand` (country +0x28, index +0x2c, priority +0x30) or `CSetOrderGroupMotorizationCommand` (army
 handle `53:ID` at +0x28, level byte +0x30). `--no-logistics` turns it off.
+
+Training and deployment (`hoi4ai/deploymentrec.py`): `deployment.tsv` gets each country's deployment orders and the
+divisions in training under them at its first read and then each change: date, change (`start`, `new`, `changed`,
+`removed`, `deployed`), country, order (handle 64 id), line (handle 63 id; empty on an order row), template (id), name,
+amount, location (province), priority (0 low, 1 normal, 2 high; orders only), training (a line's training, written but
+not compared) and was (what changed, as `field=old`). `deployed` is a division leaving a line for the field: deployed
+early (`CDeployConveyorLineCommand`) or done training; a line the player took away (`CRemoveConveyorLineCommand`) or
+whose order was cancelled (`CRemoveConveyorCommand`) is `removed`. Read from the save-format block's
+`deployment={ military_deployment_conveyor ... military_deployment_line ... }`: the country's each day, other producing
+countries' every 7 days, the recorded country at once after `CCreateConveyorCommand` (template `52:ID` +0x28; the
+command has no country) and a country at once after a command on one of its orders or lines (`CAddConveyorLineCommand`,
+`CSetConveyorPriorityCommand`, `CSetConveyorLocationCommand`, `CChangeConveyorTemplateCommand`, `CRemoveConveyorCommand`:
+order `64:ID` +0x28, value +0x30; `CRemoveConveyorLineCommand`, `CDeployConveyorLineCommand`: line `63:ID` +0x28).
+`--no-deployment` turns it off.
 
 ### `analyze_cmdrec.py`
 
