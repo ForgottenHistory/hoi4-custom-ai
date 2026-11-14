@@ -107,7 +107,7 @@ template.
 
 Battle plans: the record also holds the lists behind battle-plan commands (divisions, path points,
 fortification provinces), and each in-game hour the country's lines are read from memory into `plans.tsv` when they
-changed: army, cohesion, kind, line id, parent line, executing, provinces, border pairs. `hoi4ai/planrec.py` has the
+changed: army, cohesion, kind, line id, parent line, executing, provinces, border pairs, span (start-end, 0..100000). `hoi4ai/planrec.py` has the
 layouts and `decode()` for each battle-plan command. `--no-plans` turns it off.
 
 ### `analyze_cmdrec.py`

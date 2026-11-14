@@ -14,8 +14,8 @@ Commands (the army is a handle {53, id} at +0x28 of each, so its id is the int a
                                 end along the CFront's sections (int64, 100000 = all of it)
   COrderNewFrontCommand         offensive line: +0x38 divisions, +0x50 province points (the last is the target),
                                 +0x68 id of the front line it belongs to
-  COrderEditRootCommand         front line dragged: +0x30 line id, +0x38 / +0x40 its new bounds (int64; which is
-                                start and which end is not known yet: shortening one end gave 100000 / 16666)
+  COrderEditRootCommand         front line dragged: +0x30 line id, +0x38 new end, +0x40 new start (int64; dragging
+                                the start in from 0 gave end 100000, start 16666)
   COrderSetPathCommand          offensive line redrawn: +0x30 line id, +0x38 province points
   COrderNewFallbackCommand      fortification line: +0x48 provinces
   COrderExecuteCommand          +0x34 1 execute, 0 stop
@@ -31,7 +31,8 @@ Memory:
     +0xb0 and +0xc8 (a fortification line showed up in both, ids one apart)
   COrderInstance: +0x244 id, +0x248 byte executing, +0x70 provinces (int32: a front line's own provinces in order,
     an offensive line's path from the front to the target), +0x88 (ours, theirs) border pairs as CProvince pointers
-    (front lines), +0x1f8 child lines (a front line's offensive lines)
+    (front lines), +0x1f8 child lines (a front line's offensive lines), +0x188 / +0x270 a front line's start / end
+    (int64, 0..100000 along the CFront)
 """
 import re
 
@@ -102,7 +103,7 @@ def decode(cls, hexdump, extra=""):
         d.update(what="offensive_line", parent=_i32(b, 0x68), points=_ints(L.get(0x50, [])),
                  divisions=_divs(L.get(0x38, [])))
     elif cls == "COrderEditRootCommand":
-        d.update(what="edit_front_line", line=_i32(b, 0x30), bound_38=_i64(b, 0x38), bound_40=_i64(b, 0x40))
+        d.update(what="edit_front_line", line=_i32(b, 0x30), start=_i64(b, 0x40), end=_i64(b, 0x38))
     elif cls == "COrderSetPathCommand":
         d.update(what="set_path", line=_i32(b, 0x30), points=_ints(L.get(0x38, [])))
     elif cls == "COrderNewFallbackCommand":
@@ -139,7 +140,8 @@ def _addresses(type_, ids):
 
 def snapshot(proc, army_ids):
     """Every line of these armies (COrdersGroup ids; other order ids are skipped):
-    [(army, cohesion, kind, line id, parent line id or 0, executing, provinces, border pairs)]. An army with no
+    [(army, cohesion, kind, line id, parent line id or 0, executing, provinces, border pairs, span)], SPAN a front
+    line's (start, end) along its CFront (0..100000), else None. An army with no
     line gives one row with kind "-" so its cohesion is still recorded."""
     def rd(addr, n):
         raw = proc.read(addr, n)
@@ -157,11 +159,13 @@ def snapshot(proc, army_ids):
     def line(aid, coh, kind, o, parent, depth=0):
         lid = rd(o + 0x244, 4)
         provs = [p if p < 2 ** 31 else p - 2 ** 32 for p in vec(o + 0x70, 4)]
-        pairs = []
+        pairs, span = [], None
         if kind == "front" and not parent:
             ps = [rd(p + 0xa4, 4) for p in vec(o + 0x88, 8)]
             pairs = list(zip(ps[0::2], ps[1::2]))
-        rows.append((aid, coh, kind if not parent else "offensive", lid, parent, rd(o + 0x248, 1), provs, pairs))
+            span = (rd(o + 0x188, 8), rd(o + 0x270, 8))
+        rows.append((aid, coh, kind if not parent else "offensive", lid, parent, rd(o + 0x248, 1), provs, pairs,
+                     span))
         if depth < 3:
             for c in vec(o + 0x1f8, 8):
                 line(aid, coh, kind, c, lid, depth + 1)
@@ -176,7 +180,7 @@ def snapshot(proc, army_ids):
                 for o in vec(a + off, 8):
                     line(aid, coh, kind, o, 0)
             if len(rows) == n0:
-                rows.append((aid, coh, "-", 0, 0, 0, [], []))
+                rows.append((aid, coh, "-", 0, 0, 0, [], [], None))
         except (OSError, TypeError):
             continue
     return rows
@@ -199,7 +203,7 @@ def armies_of(tag, gap=1000):
     return out
 
 
-HEADER = "date\tarmy\tcohesion\tkind\tline\tparent\texecuting\tprovinces\tborder"
+HEADER = "date\tarmy\tcohesion\tkind\tline\tparent\texecuting\tprovinces\tborder\tspan"
 
 
 class PlanLog:
@@ -225,7 +229,7 @@ class PlanLog:
         if rows == self.last:
             return 0
         self.last = rows
-        lines = format_rows(date, rows) or [f"{date}\t-\t-\t-\t0\t0\t0\t\t"]
+        lines = format_rows(date, rows) or [f"{date}\t-\t-\t-\t0\t0\t0\t\t\t"]
         self.f.write("\n".join(lines) + "\n")
         self.f.flush()
         return len(lines)
@@ -236,7 +240,8 @@ class PlanLog:
 
 def format_rows(date, rows):
     out = []
-    for aid, coh, kind, lid, parent, ex, provs, pairs in rows:
+    for aid, coh, kind, lid, parent, ex, provs, pairs, span in rows:
         out.append(f"{date}\t{aid}\t{COHESION.get(coh, coh)}\t{kind}\t{lid}\t{parent}\t{ex}"
-                   f"\t{','.join(map(str, provs))}\t{' '.join(f'{a}:{b}' for a, b in pairs)}")
+                   f"\t{','.join(map(str, provs))}\t{' '.join(f'{a}:{b}' for a, b in pairs)}"
+                   f"\t{f'{span[0]}-{span[1]}' if span else ''}")
     return out
