@@ -9,7 +9,8 @@ hoi4ai/planrec.py), the country's state each day (country/, country.tsv, hoi4ai/
 (events.tsv, hoi4ai/eventrec.py), and every country's division templates as they are created, edited and removed
 (division_templates.tsv, hoi4ai/templaterec.py), every country's equipment designs and the ones made obsolete
 (equipment_designs.tsv, hoi4ai/equipmentrec.py; obsolete needs the record), and every country's production lines as
-they change (production_lines.tsv, hoi4ai/productionrec.py). It stops a
+they change (production_lines.tsv, hoi4ai/productionrec.py), and MIO sizes, points and traits (mios.tsv,
+hoi4ai/miorec.py). It stops a
 step after the target capitulates, --war-days after the declaration, or with Ctrl+C. Our own controller records the same way by itself.
 
 Recordings go to recordings/battle_<label>_<TAG>_<time>/.
@@ -21,7 +22,7 @@ import time
 
 import _bridge  # noqa: F401
 from hoi4bridge import BridgeError, BridgeUnavailable, send, trigger
-from hoi4ai import countryrec, equipmentrec, eventrec, planrec, productionrec, templaterec
+from hoi4ai import countryrec, equipmentrec, eventrec, miorec, planrec, productionrec, templaterec
 from hoi4ai.battlerec import BattleRecorder
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.live import Provinces
@@ -52,6 +53,7 @@ def main():
     templates = templaterec.TemplateLog(os.path.join(folder, "division_templates.tsv"), events and events.names)
     designs = equipmentrec.DesignLog(os.path.join(folder, "equipment_designs.tsv"), events and events.names)
     production = productionrec.ProductionLog(os.path.join(folder, "production_lines.tsv"), events and events.names)
+    mios = miorec.MioLog(os.path.join(folder, "mios.tsv"), [tag])
     plans = planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = countryrec.CountryLog(folder, tag)
     provinces = Provinces()
@@ -108,6 +110,10 @@ def main():
                 production.step(f"{now:%Y-%m-%d %H:00}", events.lines if events else ())
             except (OSError, BridgeError, BridgeUnavailable) as e:
                 print("production:", e)
+            try:
+                mios.step(f"{now:%Y-%m-%d %H:00}")
+            except (OSError, BridgeError, BridgeUnavailable) as e:
+                print("mios:", e)
             taken = int(((provinces.owner == ids[target]) & (provinces.controller == ids[tag])).sum())
             print(f"{now:%Y-%m-%d %H:00} war={int(at_war)} divisions={len(divs)} taken={taken}")
             done = capitulated

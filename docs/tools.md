@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -151,6 +151,14 @@ switching the line to another design, moving it in the list (moving one line shi
 around it) or assigning, switching or removing the MIO. The lines are read (under a second) after each production command in the record (those
 lines say who acted) and each in-game day, which catches the AI: it changes its lines without commands. Naval lines
 aren't covered yet. `--no-production` turns it off.
+
+MIOs (`hoi4ai/miorec.py`): `mios.tsv` gets every MIO of the country and of every other country with production
+lines at the start (`start`, about 7 s), then each MIO `changed` (size, trait points or traits; funds are
+written but grow daily, so they don't count), `new` or `removed`: date, change, country, MIO token, id (the
+production lines' manufacturer), size, points, funds, traits (the unlocked trait tokens). Picking a trait runs no
+command, so the state is read instead: the country's own MIOs each in-game day, the others every 7 days, from
+the save-format block (`bridge.country`). A trait pick shows as one point fewer and one more trait. `--no-mios`
+turns it off.
 
 ### `analyze_cmdrec.py`
 
