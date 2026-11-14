@@ -95,7 +95,7 @@ class Names:
 
 class EventLog:
     def __init__(self, record, out, names=None):
-        self.record, self.pos, self.date = record, 0, ""
+        self.record, self.pos, self.date, self.lines = record, 0, "", []
         self.names = names or Names()
         new = not os.path.exists(out)
         self.f = open(out, "a", encoding="utf-8")
@@ -103,7 +103,9 @@ class EventLog:
             self.f.write(HEADER + "\n")
 
     def step(self):
-        """Decode the complete lines added to the record since the last call; returns the rows written."""
+        """Decode the complete lines added to the record since the last call (kept in .lines for other logs, such as
+        templaterec's); returns the rows written."""
+        self.lines = []
         try:
             with open(self.record, "rb") as g:
                 g.seek(self.pos)
@@ -113,7 +115,8 @@ class EventLog:
         end = data.rfind(b"\n") + 1
         self.pos += end
         n = 0
-        for line in data[:end].decode("utf-8", errors="replace").splitlines():
+        self.lines = data[:end].decode("utf-8", errors="replace").splitlines()
+        for line in self.lines:
             if line.startswith("#mark\t") and "\tdate=" in line:
                 self.date = line.split("\tdate=", 1)[1].strip()
                 continue

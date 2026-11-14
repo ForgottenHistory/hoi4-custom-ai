@@ -6,7 +6,8 @@ Start the game (play the country, or `observe` to let the game's AI fight), then
 hours it writes every division of the country and its enemies and who controls each province
 (hoi4ai/battlerec.py), its battle plans when they changed (plans.tsv,
 hoi4ai/planrec.py), the country's state each day (country/, country.tsv, hoi4ai/countryrec.py), every command the game executes (bridge.cmdrec, with the date stamped in) and the event choices among them
-(events.tsv, hoi4ai/eventrec.py). It stops a
+(events.tsv, hoi4ai/eventrec.py), and every country's division templates as they are created, edited and removed
+(division_templates.tsv, hoi4ai/templaterec.py). It stops a
 step after the target capitulates, --war-days after the declaration, or with Ctrl+C. Our own controller records the same way by itself.
 
 Recordings go to recordings/battle_<label>_<TAG>_<time>/.
@@ -18,7 +19,7 @@ import time
 
 import _bridge  # noqa: F401
 from hoi4bridge import BridgeError, BridgeUnavailable, send, trigger
-from hoi4ai import countryrec, eventrec, planrec
+from hoi4ai import countryrec, eventrec, planrec, templaterec
 from hoi4ai.battlerec import BattleRecorder
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.live import Provinces
@@ -46,6 +47,8 @@ def main():
         print(send("bridge.cmdrec on " + os.path.join(folder, "command_record.tsv"))[0])
     events = None if a.no_cmdrec else eventrec.EventLog(os.path.join(folder, "command_record.tsv"),
                                                         os.path.join(folder, "events.tsv"))
+    templates = None if a.no_cmdrec else templaterec.TemplateLog(os.path.join(folder, "division_templates.tsv"),
+                                                                 events.names)
     plans = planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = countryrec.CountryLog(folder, tag)
     provinces = Provinces()
@@ -90,6 +93,10 @@ def main():
                     events.step()
                 except (OSError, BridgeError, BridgeUnavailable) as e:
                     print("events:", e)
+                try:
+                    templates.step(f"{now:%Y-%m-%d %H:00}", events.lines)
+                except (OSError, BridgeError, BridgeUnavailable) as e:
+                    print("templates:", e)
             taken = int(((provinces.owner == ids[target]) & (provinces.controller == ids[tag])).sum())
             print(f"{now:%Y-%m-%d %H:00} war={int(at_war)} divisions={len(divs)} taken={taken}")
             done = capitulated
@@ -104,6 +111,8 @@ def main():
         if not a.no_cmdrec:
             print(send("bridge.cmdrec off")[0])
             events.step()
+            if last:
+                templates.step(f"{last:%Y-%m-%d %H:00}", events.lines)
     print("recorded into", folder)
 
 

@@ -14,6 +14,8 @@ Country state (hoi4ai/countryrec.py): each in-game day the country's whole save-
 country/DAY.txt.gz, headline numbers to country.tsv, the templates and equipment it names to templates.tsv and
 equipment.tsv, and its intel over every other country (the fog of war) to intel.tsv.
 Events (hoi4ai/eventrec.py): every event any country answers, with the option it picked, to events.tsv.
+Division templates (hoi4ai/templaterec.py): every country's templates at the start, then each one created, edited,
+or removed, to division_templates.tsv.
 Analyse with analyze_cmdrec.py.
 """
 import argparse
@@ -22,7 +24,7 @@ import re
 import time
 
 import _bridge  # noqa: F401  (puts the hoi4-bridge client on the path)
-from hoi4ai import countryrec, eventrec, planrec
+from hoi4ai import countryrec, eventrec, planrec, templaterec
 from hoi4ai.gamefiles import game_dir
 from hoi4bridge import BridgeError, player_tag, query, send
 
@@ -57,6 +59,7 @@ def main():
     ap.add_argument("--no-snap", action="store_true", help="no daily division snapshots")
     ap.add_argument("--no-plans", action="store_true", help="no battle-plan snapshots (plans.tsv)")
     ap.add_argument("--no-country", action="store_true", help="no daily country state (country/, country.tsv)")
+    ap.add_argument("--no-templates", action="store_true", help="no division template log (division_templates.tsv)")
     a = ap.parse_args()
 
     try:
@@ -74,6 +77,8 @@ def main():
     record = os.path.join(folder, "command_record.tsv")
     print(send("bridge.cmdrec on " + record)[0])
     events = eventrec.EventLog(record, os.path.join(folder, "events.tsv"))
+    templates = None if a.no_templates else templaterec.TemplateLog(os.path.join(folder, "division_templates.tsv"),
+                                                                    events.names)
     plans = None if a.no_plans else planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = None if a.no_country else countryrec.CountryLog(folder, tag)
     send(f"bridge.cmdrec mark player={player}")
@@ -109,6 +114,11 @@ def main():
                     events.step()   # the mark flushed the record
                 except (OSError, BridgeError) as e:
                     print("events:", e)
+                if templates:
+                    try:
+                        templates.step(d, events.lines)
+                    except (OSError, BridgeError) as e:
+                        print("templates:", e)
                 if not a.no_snap and day and day != last_day:
                     send(f"bridge.snap {day} 51 {SNAP_FIELDS}")
                     last_day = day
@@ -118,6 +128,8 @@ def main():
     finally:
         print(send("bridge.cmdrec off")[0])
         events.step()
+        if templates and last:
+            templates.step(last, events.lines)
 
 
 if __name__ == "__main__":

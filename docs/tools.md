@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -125,6 +125,14 @@ event, the one it is about), event id and name, option index and name, and how m
 needs a hoi4-bridge with `bridge.cmdrec field` (it sits at +0xe8 of the command, past the bytes the record keeps).
 Hidden events run no command and are not recorded. `tools/events.py RECORD [OUT]` decodes an older record
 (names from the running game, same mods; no options).
+
+Division templates (`hoi4ai/templaterec.py`): every country's templates go to `division_templates.tsv`, first all of
+them (`start`), then each one `new`, `changed` (an edit keeps the template's id) or `removed`: date, change, id,
+owner, name, battalions, support companies. Battalions are the designer's grid, columns separated by `|`, each top to
+bottom (`infantry,infantry,infantry|infantry,infantry,infantry|...`). The templates are read again whenever the record
+holds a template command (create, edit in the designer, remove, set obsolete; those lines in `command_record.tsv` say
+who acted), when a new template id turns up (checked each in-game day) and every 7 days, since focuses and events can
+change templates without a command. A full read takes about a second. `--no-templates` turns it off.
 
 ### `analyze_cmdrec.py`
 
