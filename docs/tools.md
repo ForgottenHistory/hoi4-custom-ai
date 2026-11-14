@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), fuel prioritization and army motorization (`logistics.tsv`), training and deployment (`deployment.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), fuel prioritization and army motorization (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -226,6 +226,19 @@ command has no country) and a country at once after a command on one of its orde
 `CSetConveyorPriorityCommand`, `CSetConveyorLocationCommand`, `CChangeConveyorTemplateCommand`, `CRemoveConveyorCommand`:
 order `64:ID` +0x28, value +0x30; `CRemoveConveyorLineCommand`, `CDeployConveyorLineCommand`: line `63:ID` +0x28).
 `--no-deployment` turns it off.
+
+Generals (`hoi4ai/generalrec.py`): `generals.tsv` gets each country's generals and field marshals at its first read and
+then each change: date, change (`start`, `new`, `changed`, `removed`), country, leader (handle 4713 id), name, role
+(`general`, `field_marshal`), attack, defense, planning, logistics (as the game shows them), traits (comma-separated, in
+the game's order, passing ones like `recently_promoted` included), army (the army or army group it commands, e.g.
+`409 Army 1`) and was (`field=old`, `;`-separated). Read from memory: the `CArmyLeader` objects (a scan at the first
+read and every 7 days; key +0x20, name +0x40, country +0x120, field-marshal flag +0xde8, role +0xe7c, skills
++0xf58/+0xf68/+0xf78/+0xf88, traits a vector of `CUnitLeaderTrait*` at +0xdc8 with the key at +0x10 of each) and each
+army's leader (`bridge.object 53 ID`, `CArmyLeader*` at +0x88). The country's each day, other producing countries'
+every 7 days, and a country's at once after `CSetArmyLeaderCommand` (leader `4713:ID` +0x28, army `53:ID` +0x30),
+`CPromoteUnitLeaderCommand`, `CLearnTraitCommand` (leader +0x28, trait +0x30), `CUpgradeDivisionOfficerCommand`
+(recruiting: Officers, Promote; division `51:ID` +0x28; a new scan finds the new general) or `CCreateUnitLeaderCommand`.
+`--no-generals` turns it off.
 
 ### `analyze_cmdrec.py`
 
