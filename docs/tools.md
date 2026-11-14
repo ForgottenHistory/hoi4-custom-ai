@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -118,6 +118,13 @@ changes) and `equipment.tsv`. `intel.tsv` holds the country's intel (civilian, a
 other country each day: the player's fog of war, since what the map shows of a country's army follows army intel
 (division counts "?" below 10%, then approximate; template details from 30%, exact from 80%). `--no-country` turns it
 off.
+
+Events (`hoi4ai/eventrec.py`): every event any country answers, by click or AI pick, news events included, goes to
+`events.tsv` after each date mark: date, record line, the country answering, the country it came from (for a news
+event, the one it is about), event id and name, option index and name, and how many options it has. The option
+needs a hoi4-bridge with `bridge.cmdrec field` (it sits at +0xe8 of the command, past the bytes the record keeps).
+Hidden events run no command and are not recorded. `tools/events.py RECORD [OUT]` decodes an older record
+(names from the running game, same mods; no options).
 
 ### `analyze_cmdrec.py`
 

@@ -5,7 +5,8 @@
 Start the game (play the country, or `observe` to let the game's AI fight), then run this. Every --hours in-game
 hours it writes every division of the country and its enemies and who controls each province
 (hoi4ai/battlerec.py), its battle plans when they changed (plans.tsv,
-hoi4ai/planrec.py), the country's state each day (country/, country.tsv, hoi4ai/countryrec.py), and every command the game executes (bridge.cmdrec, with the date stamped in). It stops a
+hoi4ai/planrec.py), the country's state each day (country/, country.tsv, hoi4ai/countryrec.py), every command the game executes (bridge.cmdrec, with the date stamped in) and the event choices among them
+(events.tsv, hoi4ai/eventrec.py). It stops a
 step after the target capitulates, --war-days after the declaration, or with Ctrl+C. Our own controller records the same way by itself.
 
 Recordings go to recordings/battle_<label>_<TAG>_<time>/.
@@ -17,7 +18,7 @@ import time
 
 import _bridge  # noqa: F401
 from hoi4bridge import BridgeError, BridgeUnavailable, send, trigger
-from hoi4ai import countryrec, planrec
+from hoi4ai import countryrec, eventrec, planrec
 from hoi4ai.battlerec import BattleRecorder
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.live import Provinces
@@ -41,7 +42,10 @@ def main():
     rec = BattleRecorder(folder, a.label, tag, target, tags)
     if not a.no_cmdrec:
         planrec.install_rules()
+        eventrec.install_rules()
         print(send("bridge.cmdrec on " + os.path.join(folder, "command_record.tsv"))[0])
+    events = None if a.no_cmdrec else eventrec.EventLog(os.path.join(folder, "command_record.tsv"),
+                                                        os.path.join(folder, "events.tsv"))
     plans = planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = countryrec.CountryLog(folder, tag)
     provinces = Provinces()
@@ -82,6 +86,10 @@ def main():
                 print("country:", e)
             if not a.no_cmdrec:
                 send(f"bridge.cmdrec mark date={now:%Y-%m-%d %H:00}")
+                try:
+                    events.step()
+                except (OSError, BridgeError, BridgeUnavailable) as e:
+                    print("events:", e)
             taken = int(((provinces.owner == ids[target]) & (provinces.controller == ids[tag])).sum())
             print(f"{now:%Y-%m-%d %H:00} war={int(at_war)} divisions={len(divs)} taken={taken}")
             done = capitulated
@@ -95,6 +103,7 @@ def main():
     finally:
         if not a.no_cmdrec:
             print(send("bridge.cmdrec off")[0])
+            events.step()
     print("recorded into", folder)
 
 
