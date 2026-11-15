@@ -12,20 +12,27 @@ from collections import defaultdict
 GAME = r"C:\Program Files (x86)\Steam\steamapps\common\Hearts of Iron IV"
 
 
+def key(handle, i):
+    """A division's key: its id for handle 51 (the game's setup), "4713:ID" for one trained later."""
+    return i if handle == "51" else f"{handle}:{i}"
+
+
 def load(path):
-    snaps = []   # [(day, {id: row})]
-    cols = None
+    snaps = []   # [(day, {key: row})]; a day's blocks (handles 51 and 4713) go together
+    cols, handle = None, "51"
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             p = line.rstrip("\n").split("\t")
             if p[0] == "#snap":
-                snaps.append((p[1], {}))
+                if not snaps or snaps[-1][0] != p[1]:
+                    snaps.append((p[1], {}))
+                handle = p[2]
                 cols = [c for c in p[3:] if not c.startswith("class=")]
                 continue
             if not snaps or len(p) < len(cols) + 1:
                 continue
             row = dict(zip(cols, p[1:]))
-            snaps[-1][1][int(p[0])] = {
+            snaps[-1][1][key(handle, int(p[0]))] = {
                 "owner": row["c1c8"], "province": int(row["i1e0.a4"]), "order": int(row["ib0.c"]),
                 "org": [int(row[k]) for k in ("i20", "i28", "i78")], "strength": int(row["i30"]) / 1000,
                 "template": row.get("s3a8.20", "")}

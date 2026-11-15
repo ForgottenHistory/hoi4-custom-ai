@@ -116,7 +116,7 @@ What a recording holds, and what it doesn't:
 Records every command the game executes (player and AI) while you play: turns on `bridge.cmdrec`, keeps stamping
 the in-game date into the record until Ctrl+C, which turns recording off. Each new in-game day it also snapshots
 every division (`bridge.snap`) into `unit_snapshots.tsv`: owner, province, order, organisation, strength,
-template.
+template. Two blocks a day: handle 51 (the divisions from the game's setup) and 4713 (divisions trained later).
 
 The game is never paused. The main loop only polls the date and writes the marks; the state logs below run on a
 worker thread, one step at a time, each step covering every record line since the last one, so at speed 5 a step
@@ -431,9 +431,13 @@ snapshot.
 Training examples from a cmdrec recording: `examples.jsonl`, one JSON object per decision of the player (the
 record's `#mark player=`), with the state just before it. Decisions are the player's rows of the per-system logs
 that are not `start` (politics, research, construction, production lines, trade, logistics, deployment,
-diplomacy, naval, air, generals, ...), the battle plans of `plans.tsv` when an army's plan changes, and the
-player's own commands of `command_record.tsv` (per in-game hour and class, dated by the hourly ticks; noise
-classes left out). The state: the `country.tsv` row of the day before, the current focus, research slots, laws,
+diplomacy, naval, air, generals, events, ...), the battle plans of `plans.tsv` when an army's plan changes, and
+the player's own commands of `command_record.tsv` (per in-game hour and class, dated by the hourly ticks; noise
+classes left out), each decoded: moves (division, path, target province and state), rail moves, army assignments,
+halts and battle-plan commands. The record has no owner for moves and rail moves of divisions trained during the
+game (handle 4713) nor for halts; those are the player's when a division they name is the player's in
+`unit_snapshots.tsv` (`"owner_from": "divisions"`). Divisions are keyed as in `analyze_snaps.py`: the id for
+handle 51, `4713:ID` for later ones. `CMassMoveCommand` names no divisions and is left out. The state: the `country.tsv` row of the day before, the current focus, research slots, laws,
 war goals, wars and puppets, replayed from the logs. `auto: true` marks rows the game makes by itself (a focus or
 research finishing, construction done or repaired, deployments arriving, decisions becoming available, incoming
 offers, other countries buying, deals made while auto import is on); they are kept as context. A log row is dated

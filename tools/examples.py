@@ -12,11 +12,15 @@ and prints a summary per source.
 Decisions come from the per-system logs (the rows of the player's country that are not "start") and from the
 player's own commands in command_record.tsv, grouped per in-game hour and class, each decoded: moves (division,
 province path, target and its state), rail moves (division, target), assignments to armies (army, divisions),
-battle-plan commands (hoi4ai.planrec.decode: front and offensive lines with their divisions and provinces), and the
-handles and lists the record holds for the rest. The tag is the record's "#mark player=".
+battle-plan commands (hoi4ai.planrec.decode: front and offensive lines with their divisions and provinces), halts
+(divisions), and the handles and lists the record holds for the rest. The record has no owner for some of the
+player's commands (moves and rail moves of divisions trained during the game, handle 4713, and halts): they are
+taken as the player's when a division they name is the player's in unit_snapshots.tsv ("owner_from":
+"divisions"). Divisions are keyed as in analyze_snaps: the id for handle 51, "4713:ID" for later ones.
+The tag is the record's "#mark player=".
 
 "auto" marks rows the game makes by itself rather than the player: a focus or research finishing, a construction
-done, its amount going down or a repair, a deployment arriving, a decision's state other than taken (active), an incoming offer appearing,
+done, its amount going down or a repair, a deployment arriving, a decision's state other than taken (active), an event with one option, an incoming offer appearing,
 a trade deal of another country buying from the player or made while auto import is on (a deal the player made
 then is counted as the game's: the logs can't tell them apart).
 They stay in the file (a model may want to see them as context) but are not the player's choices.
@@ -63,6 +67,7 @@ LOGS = {
     "occupation": ("country", None),
     "spirits": ("country", None),
     "market": ("seller", "buyer"),
+    "events": ("country",),
 }
 NOISE = {"CAiStoreTotalWantedNrDivisionsCommand", "CClientPingCommand", "CHourlyTickCommand"}
 SKIP = {"date", "change", "was"}
@@ -95,6 +100,8 @@ def auto(src, r, state, tag):
             return True     # another country buying from the player (the AI asks, the game accepts)
         if state.auto_import:
             return True     # the game's auto import (it changes deals by itself); a player's deal can hide here
+    if src == "events":
+        return r.get("options") == "1"     # one option: nothing to choose
     if ch in ("done", "deployed", "ignored"):
         return True
     if src == "politics" and r.get("kind") == "focus" and (r.get("slot") == "completed" or ch == "removed"):
@@ -164,6 +171,38 @@ def _lists(extra):
             for m in re.finditer(r"L\+0x([0-9a-f]+)=\[([^\]]*)\]", extra or "")}
 
 
+def division(handle, i):
+    """A division's key, as analyze_snaps keeps it: its id for handle 51, "4713:ID" for one trained later."""
+    return i if handle == 51 else f"{handle}:{i}"
+
+
+def division_owners(path):
+    """{division key: owner tag} from unit_snapshots.tsv (the last owner seen)."""
+    out, handle = {}, "51"
+    if not os.path.exists(path):
+        return out
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            p = line.split("\t", 2)
+            if p[0] == "#snap":
+                handle = p[2].split("\t", 1)[0]
+            elif len(p) > 1 and p[0].isdigit():
+                out[division(int(handle), int(p[0]))] = p[1]
+    return out
+
+
+def owner_of(cls, handles, hexdump, extra, owners):
+    """The owner of a command the record has no owner for, from the divisions it names (unit_snapshots)."""
+    found = re.findall(r"\b(51|4713):(\d+)", handles + " " + extra)
+    if cls in ("CMoveCommand", "CStrategicRedeploymentCommand") and len(hexdump) >= 0x80:
+        found.append(struct.unpack_from("<ii", bytes.fromhex(hexdump[:0x80]), 0x38))
+    for t, i in found:
+        o = owners.get(division(int(t), int(i)))
+        if o:
+            return o
+    return None
+
+
 def decode(cls, handles, hexdump, extra, states):
     """What one command says (layouts: docs/game-layouts.md, hoi4ai/planrec.py): divisions, provinces, lines."""
     d = planrec.decode(cls, hexdump, extra)
@@ -175,19 +214,21 @@ def decode(cls, handles, hexdump, extra, states):
     h, L = _handles(handles), _lists(extra)
     b = bytes.fromhex(hexdump[:0x140])
     i32 = lambda off: struct.unpack_from("<i", b, off)[0] if len(b) >= off + 4 else None  # noqa: E731
-    divs = lambda items: [int(x.split(":")[1]) for x in items if ":" in x]  # noqa: E731
+    divs = lambda items: [division(*map(int, x.split(":")[:2])) for x in items if ":" in x]  # noqa: E731
     if cls == "CMoveCommand":
         path = [int(x) for x in L.get(0x40, [])]
-        d = {"division": h.get(0x38, (0, None))[1], "path": path}
+        d = {"division": division(i32(0x38), i32(0x3c)), "path": path}
         if path:
             d["to"], d["to_state"] = path[-1], states.get(path[-1], "?")
         return d
     if cls == "CStrategicRedeploymentCommand":
         to = i32(0x40)
-        return {"division": h.get(0x38, (0, None))[1], "to": to, "to_state": states.get(to, "?")}
+        return {"division": division(i32(0x38), i32(0x3c)), "to": to, "to_state": states.get(to, "?")}
     if cls in ("COrderAssignCommand", "COrderUnassignCommand"):
         army = next((i for t, i in h.values() if t == 53), None)
         return {"army": army, "divisions": divs(L.get(0x28, []))}
+    if cls == "CCancelMovementCommand":
+        return {"divisions": divs(L.get(0x28, []))}
     out = {}
     if h:
         out["handles"] = [f"{t}:{i}" for _, (t, i) in sorted(h.items())]
@@ -196,24 +237,31 @@ def decode(cls, handles, hexdump, extra, states):
     return out
 
 
-def commands(path, tag, states):
-    """[(datetime, class, [what each says])] of TAG's commands, per in-game hour and class."""
-    clock, player, out = Clock(), None, {}
+def player_of(path):
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if line.startswith("#mark\t") and "\tplayer=" in line:
+                return line.rstrip("\n").split("player=", 1)[1]
+    return None
+
+
+def commands(path, tag, states, owners):
+    """[(datetime, class, [what each says])] of TAG's commands, per in-game hour and class. A command the record
+    has no owner for is TAG's when a division it names is TAG's (OWNERS: from unit_snapshots)."""
+    clock, out = Clock(), {}
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             date = clock.feed(line)
             p = line.rstrip("\n").split("\t")
-            if p[0] == "#mark":
-                if len(p) > 2 and p[2].startswith("player="):
-                    player = p[2][7:]
+            if p[0].startswith("#") or len(p) < 8 or p[2] in NOISE or not date or not when(date):
                 continue
-            if p[0].startswith("#") or len(p) < 4 or p[2] in NOISE:
-                continue
-            if p[3] == (tag or player) and date and when(date):
-                what = decode(p[2], p[6] if len(p) > 6 else "-", p[7] if len(p) > 7 else "",
-                              p[8] if len(p) > 8 else "", states)
+            extra = p[8] if len(p) > 8 else ""
+            if p[3] == tag or (p[3] == "-" and owner_of(p[2], p[6], p[7], extra, owners) == tag):
+                what = decode(p[2], p[6], p[7], extra, states)
+                if p[3] == "-":
+                    what["owner_from"] = "divisions"
                 out.setdefault((when(date), p[2]), []).append(what)
-    return player, [(d, c, w) for (d, c), w in sorted(out.items(), key=lambda x: x[0])]
+    return [(d, c, w) for (d, c), w in sorted(out.items(), key=lambda x: x[0])]
 
 
 def provinces_to_states(game):
@@ -233,13 +281,11 @@ def main():
     ap.add_argument("--game", default=GAME, help="the game's folder (province -> state names)")
     a = ap.parse_args()
     rec = os.path.join(a.dir, "command_record.tsv")
-    states = provinces_to_states(a.game)
-    player, cmds = commands(rec, a.tag, states) if os.path.exists(rec) else (None, [])
-    tag = a.tag or player
+    tag = a.tag or (player_of(rec) if os.path.exists(rec) else None)
     if not tag:
         sys.exit("no player tag: pass --tag")
-    if a.tag:
-        _, cmds = commands(rec, tag, states) if os.path.exists(rec) else (None, [])
+    owners = division_owners(os.path.join(a.dir, "unit_snapshots.tsv"))
+    cmds = commands(rec, tag, provinces_to_states(a.game), owners) if os.path.exists(rec) else []
 
     events = []     # (datetime, order, kind, source, row)
     for src, owners in LOGS.items():

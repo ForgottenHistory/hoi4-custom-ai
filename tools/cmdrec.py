@@ -272,7 +272,9 @@ def main():
                 wake.set()
                 day = day_label(d)
                 if not a.no_snap and day and day != last_day:
-                    send(f"bridge.snap {day} 51 {SNAP_FIELDS}")
+                    # divisions from the game's setup are handle 51; ones trained later are 4713 (shared with
+                    # unit leaders and more, so the class filter matters): two blocks with the same day
+                    send(f"bridge.snap {day} 51 {SNAP_FIELDS}", f"bridge.snap {day} 4713 {SNAP_FIELDS}")
                     last_day = day
             time.sleep(a.interval)
     except KeyboardInterrupt:
