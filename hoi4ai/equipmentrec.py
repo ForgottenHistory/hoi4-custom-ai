@@ -8,7 +8,9 @@ A design is never edited: the designer saves a new one (an "upgrade" keeps the o
 new id, based on the old Bf 109 D, which the player then usually makes obsolete). Existing equipment isn't converted.
 
 New designs get the next free id (handle 70, shared by all countries), so each new in-game day and whenever the
-record LINES hold a design command the ids past the highest known are probed. The commands:
+record LINES hold a design command the ids past the highest known are probed. The first call takes the designs
+from the memory scan (shared.ids; the bridge only for an id with more than one address) and probes past the
+highest; without a scan it probes every id. The commands:
   CCreateEquipmentVariantCommand       +0x30 country id, +0x34 handle type 70, +0x38 the design it's based on,
                                        +0x40 the new name (std::string); the new id isn't in it
   CSetObsoleteEquipmentVariantCommand  +0x28 handle type 70, +0x2c design id, +0x30 flag (byte, 1 = obsolete)
@@ -20,8 +22,10 @@ import os
 import re
 import struct
 
+from hoi4ai import shared
 from hoi4bridge import send
 
+VARIANT = "CEquipmentVariant"
 CREATE, OBSOLETE = "CCreateEquipmentVariantCommand", "CSetObsoleteEquipmentVariantCommand"
 HEADER = "date\tchange\tid\towner\tname\ttype\tmodules\tbased_on"
 
@@ -29,6 +33,8 @@ HEADER = "date\tchange\tid\towner\tname\ttype\tmodules\tbased_on"
 def _probe(ids):
     """{design id: address} for those of IDS that exist."""
     out = {}
+    if not ids:
+        return out
     for k, r in zip(ids, send(*[f"bridge.object 70 {j}" for j in ids])):
         m = re.search(r"@0x([0-9a-fA-F]+)", r) if r.startswith("OK") and "CEquipmentVariant" in r else None
         if m:
@@ -57,6 +63,7 @@ class DesignLog:
         from hoi4ai.templates import Reader
         self.proc = Process()
         self.reader = Reader(self.proc)
+        shared.want(VARIANT)
         self.names = names or Names()
         self.addr, self.top, self.day = None, 0, None
         new = not os.path.exists(path)
@@ -74,7 +81,13 @@ class DesignLog:
         self.f.write("\t".join((date, change, str(did), owner, name, typ, mods, str(based_on))) + "\n")
 
     def _all(self):
-        out, i = {}, 1
+        try:
+            scanned = shared.ids(VARIANT, 70)
+        except Exception:
+            scanned = {}
+        out = {i: a[0] for i, a in scanned.items() if len(a) == 1}
+        out.update(_probe(sorted(i for i, a in scanned.items() if len(a) > 1)))
+        i = max(out) + 1 if out else 1
         while i - max(out, default=0) <= 100:
             out.update(_probe(range(i, i + 100)))
             i += 100

@@ -53,6 +53,7 @@ def game_doctrines(files=None):
 
 class DoctrineLog:
     def __init__(self, path, names=None):
+        shared.want(STATUS)
         from hoi4ai.eventrec import Names
         from hoi4ai.memory import Process
         from hoi4ai.templates import _string

@@ -34,7 +34,9 @@ amount its value; change start, changed (was the old value).
 
 Reads: the construction lines and deals at the first call, each new in-game day and at once after a construction or
 trade command in the record LINES (CONSTRUCTION, TRADE): one batched `bridge.write` of the ids seen before and of
-the ids past the highest (new objects get higher ids); the first read probes every id. A building's state is its
+the ids past the highest (new objects get higher ids). The first read writes the ids of the lines and deals found by
+the memory scan (shared.ids: handle at +0x8, id at +0xc) and walks up from the highest to the handle's last id;
+without a scan it probes every id. A building's state is its
 location, or the province's state for province buildings (common/buildings with province_max); owners come from
 memory (hoi4ai.live.Provinces). A deal's text names only the importer; the exporter is the country whose
 CCountryResources (CCountry +0x11f8; the country id at CCountry +0x8) the deal points to at +0x80. Settings: TAGS each
@@ -128,13 +130,35 @@ def write_objects(handle, ids):
 class _Ids:
     """The live ids of one handle: those seen before plus the ones past the highest."""
 
-    def __init__(self, handle, ahead):
-        self.handle, self.ahead = handle, ahead
+    def __init__(self, handle, ahead, classes=()):
+        self.handle, self.ahead, self.classes = handle, ahead, classes
         self.ids, self.top = set(), 0
+        if classes:
+            shared.want(*classes)
+
+    def _scanned(self):
+        """The ids of CLASSES from the memory scan, or None without one."""
+        try:
+            ids = set()
+            for c in self.classes:
+                ids |= set(shared.ids(c, self.handle))
+            return ids or None
+        except Exception:
+            return None
 
     def read(self, keep):
         """{id: (class, text)} of every object; KEEP(class) says which ids to look at again next time."""
-        if not self.top:
+        scanned = self._scanned() if not self.top and self.classes else None
+        if scanned:
+            found = write_objects(self.handle, scanned)
+            self.top = max(found or [0])
+            while True:     # up from the highest to the handle's last id
+                batch = write_objects(self.handle, range(self.top + 1, self.top + 1 + PROBE))
+                found.update(batch)
+                if not batch:
+                    break
+                self.top = max(batch)
+        elif not self.top:
             found, lo = {}, 1
             while True:     # PROBE at a time until a batch finds none
                 batch = write_objects(self.handle, range(lo, lo + PROBE))
@@ -169,8 +193,9 @@ class EconomyLog:
         self.others = others
         self.provinces, self.proc = None, None
         self.state_owner = {}
-        self.lines = _Ids(59, AHEAD)
-        self.objects = _Ids(4713, AHEAD_4713)
+        self.lines = _Ids(59, AHEAD, ("CBuildingProductionLine",))
+        self.objects = _Ids(4713, AHEAD_4713, ("CResourceExchange", "CRailwayProductionLine"))
+        shared.want("CCountry")
         self.held = None            # line key -> row fields
         self.deals = None           # deal id -> (exporter, importer, resource, amount, factories, started)
         self.exporters = {}         # CCountryResources address -> tag
@@ -196,23 +221,28 @@ class EconomyLog:
         st = self.provinces.state if self.provinces is not None else ()
         return int(st[province]) if 0 < province < len(st) else 0
 
-    def _exporter(self, deal):
-        """The exporting country of deal DEAL, from memory."""
+    def _exporters(self, deals):
+        """{deal: the exporting country} of the deals DEALS, from memory (one batched `bridge.object`)."""
+        out = dict.fromkeys(deals, "?")
+        if not deals or self.proc is None:
+            return out
         try:
-            r = send(f"bridge.object 4713 {deal}")
-            m = re.search(r"@0x([0-9a-f]+)", r[0]) if r and r[0].startswith("OK") else None
-            if not m or self.proc is None:
-                return "?"
-            res = self.proc.u64(int(m.group(1), 16) + DEAL_EXPORTER)
-            if res not in self.exporters:
-                for c in shared.objects("CCountry"):
-                    if self.proc.class_of(c) == "CCountry":
-                        r2 = self.proc.u64(c + RESOURCES)
-                        if r2:
-                            self.exporters[r2] = self.names.tag(self.proc.i32(c + COUNTRY_ID))
-            return self.exporters.get(res, "?")
+            r = send(*[f"bridge.object 4713 {d}" for d in deals])
+            for deal, line in zip(deals, r):
+                m = re.search(r"@0x([0-9a-f]+)", line) if line.startswith("OK") else None
+                if not m:
+                    continue
+                res = self.proc.u64(int(m.group(1), 16) + DEAL_EXPORTER)
+                if res not in self.exporters:
+                    for c in shared.objects("CCountry"):
+                        if self.proc.class_of(c) == "CCountry":
+                            r2 = self.proc.u64(c + RESOURCES)
+                            if r2:
+                                self.exporters[r2] = self.names.tag(self.proc.i32(c + COUNTRY_ID))
+                out[deal] = self.exporters.get(res, "?")
         except (BridgeError, BridgeUnavailable, OSError):
-            return "?"
+            pass
+        return out
 
     # --- construction ---------------------------------------------------------------------------------------------
     def _building(self, d):
@@ -292,14 +322,16 @@ class EconomyLog:
 
     # --- trade ----------------------------------------------------------------------------------------------------
     def _trade(self, found4713):
-        now = {}
+        now, fields = {}, {}
         for oid, (cls, body) in found4713.items():
             if cls != "CResourceExchange":
                 continue
             d = dict(_FIELD.findall(body))
-            if "resource" not in d:
-                continue        # a convoy client, not a deal
-            exp = self.deals[oid][0] if self.deals and oid in self.deals else self._exporter(oid)
+            if "resource" in d:     # else a convoy client, not a deal
+                fields[oid] = d
+        exps = self._exporters([o for o in fields if not (self.deals and o in self.deals)])
+        for oid, d in fields.items():
+            exp = self.deals[oid][0] if self.deals and oid in self.deals else exps[oid]
             now[oid] = (exp, d.get("receiver", "?"), d["resource"], d.get("delivered", ""),
                         d.get("required_cic", ""), d.get("start_date", ""))
         rows = []

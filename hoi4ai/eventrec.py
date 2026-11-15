@@ -59,12 +59,16 @@ class Names:
         self.tags, self.events, self.proc = {}, {}, None
 
     def tag(self, cid):
+        """The tag of country id CID. A miss asks for the 64 ids around it in one batched send."""
         if cid not in self.tags:
+            ids = [cid] if not isinstance(cid, int) or cid < 0 else \
+                [i for i in range(cid - cid % 64, cid - cid % 64 + 64) if i not in self.tags]
             try:
-                r = send(f"bridge.tag {cid}")[0]
-                self.tags[cid] = r.split("=", 1)[1].strip() if r.startswith("OK") and "=" in r else str(cid)
+                for i, r in zip(ids, send(*[f"bridge.tag {i}" for i in ids])):
+                    self.tags[i] = r.split("=", 1)[1].strip() if r.startswith("OK") and "=" in r else str(i)
             except BridgeError:
-                self.tags[cid] = str(cid)
+                pass
+            self.tags.setdefault(cid, str(cid))
         return self.tags[cid]
 
     def event(self, eid):

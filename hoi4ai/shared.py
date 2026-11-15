@@ -9,11 +9,16 @@ objects(cls)      the addresses of the objects of class CLS (as Process.find_obj
                   memory on a thread: one pass for every class asked for so far, again SCAN_SECONDS after the last
                   ended. A scan takes seconds; only the first call for a class waits for one. The addresses may be
                   stale or miss objects made since the scan, so callers check what they find (as they did).
+                  The scan compares every aligned 8-byte word of the game's private memory with the classes'
+                  vtables (numpy), one pass for all of them: ~5 s for 8 GB.
+want(*classes)    add CLASSES to the scan and start it, so a recorder made at startup has them by its first step.
+ids(cls, handle)  {id: [address]} of the scanned CLS objects of bridge handle HANDLE (handle at +0x8, id at
+                  +0xc); more than one address when stale copies are left in memory.
 """
-import struct
 import threading
 import time
 
+import numpy as np
 from hoi4bridge import send
 
 SCAN_SECONDS = 30
@@ -58,20 +63,21 @@ class _Scanner:
         for c in classes:
             if c not in self.vtables:
                 self.vtables[c] = proc.vtable_of(c)
-        vts = {struct.pack("<Q", self.vtables[c]): c for c in classes if self.vtables[c] is not None}
+        vts = {self.vtables[c]: c for c in classes if self.vtables[c] is not None}
         out = {c: [] for c in classes}
+        if not vts:
+            return out
+        want = np.array(sorted(vts), dtype="<u8")
         chunk = 1 << 24
-        for base, size in proc.regions():
+        for base, size in proc.regions():        # regions are page aligned, so word i is at base + off + 8 i
             for off in range(0, size, chunk):
-                b = proc.read(base + off, min(chunk + 8, size - off))
+                b = proc.read(base + off, min(chunk, size - off))
                 if not b:
                     continue
-                for pat, c in vts.items():
-                    i = b.find(pat)
-                    while i >= 0:
-                        if (base + off + i) % 8 == 0:
-                            out[c].append(base + off + i)
-                        i = b.find(pat, i + 1)
+                words = np.frombuffer(b, dtype="<u8", count=len(b) // 8)
+                hit = (words == want[0]) if len(want) == 1 else np.isin(words, want)
+                for i in np.flatnonzero(hit):
+                    out[vts[int(words[i])]].append(base + off + 8 * int(i))
         return out
 
     def _run(self):
@@ -89,14 +95,18 @@ class _Scanner:
                 self.lock.notify_all()
                 self.lock.wait_for(lambda: self.wanted - set(self.found), timeout=SCAN_SECONDS)
 
-    def objects(self, cls):
+    def want(self, classes):
         with self.lock:
-            if cls not in self.wanted:
-                self.wanted.add(cls)
+            if not set(classes) <= self.wanted:
+                self.wanted.update(classes)
                 self.lock.notify_all()
             if self.thread is None:
                 self.thread = threading.Thread(target=self._run, name="object scan", daemon=True)
                 self.thread.start()
+
+    def objects(self, cls):
+        self.want((cls,))
+        with self.lock:
             self.lock.wait_for(lambda: cls in self.found)
             return list(self.found[cls])
 
@@ -109,6 +119,24 @@ def objects(cls):
 
 
 def want(*classes):
-    """Add CLASSES to the scan before anyone asks (so the first scan finds them all in one pass)."""
-    with _scanner.lock:
-        _scanner.wanted.update(classes)
+    """Add CLASSES to the scan and start it, before anyone asks (so the first scan finds them all in one pass)."""
+    _scanner.want(classes)
+
+
+_proc = None
+
+
+def ids(cls, handle):
+    """{id: [address]} of the scanned CLS objects whose bridge handle is HANDLE. Stale objects may be among them."""
+    global _proc
+    from hoi4ai.memory import Process
+    if _proc is None:
+        _proc = Process()
+    out = {}
+    for a in objects(cls):
+        try:
+            if _proc.i32(a + 8) == handle:
+                out.setdefault(_proc.i32(a + 0xc), []).append(a)
+        except OSError:
+            pass
+    return out

@@ -188,6 +188,7 @@ def parse(line):
 
 class NavalLog:
     def __init__(self, path, admiral_path=None, names=None, tags=(), others=lambda: ()):
+        shared.want(CLASS)
         from hoi4ai.eventrec import Names
         from hoi4ai.memory import Process
         self.proc = Process()

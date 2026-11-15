@@ -123,7 +123,8 @@ worker thread, one step at a time, each step covering every record line since th
 can span a day or more. To keep steps short, a step reads each country's save-format block once
 (`hoi4ai/shared.py`), the other producing countries are spread over the week (a seventh of them each day instead of
 all of them every 7 days), and the memory scans for generals, task forces and doctrines run on one background
-thread (`shared.objects`, rescanned every 30 s). `--profile` prints each step's time per log.
+thread (`shared.objects`: one numpy pass over the game's memory for all classes, ~5 s, started when the logs are
+made, rescanned every 30 s). `--profile` prints each step's time per log.
 
 Dates: the game runs one `CHourlyTickCommand` per in-game hour and the record holds each one, so readers date a
 command by counting the ticks from the marks (`hoi4ai/clock.py`). A mark's date can be some hours late when the
@@ -203,7 +204,7 @@ subdoctrine on each track, at the start and then as each is `new`, `changed` or 
 folder (`land`, `naval`, `air`, `special_forces`), track (empty for the grand doctrine, else `infantry`, `armor`...),
 doctrine and was (the game's keys, e.g. `superior_firepower`, `defensive_postures`) and the track's mastery. They are
 read from memory (`CCountryDoctrineStatus@NDoctrines`; the save-format block has no doctrines) each in-game day and
-after a doctrine command; finding the objects is a memory scan (~10 s) at the start and every 7 days. In the record,
+after a doctrine command; finding the objects is a memory scan (~5 s) at the start and every 7 days. In the record,
 picking is `CUnlockGrandDoctrineCommand@NDoctrines` (template pointer +0x28, country +0x30) and
 `CUnlockSubDoctrineCommand@NDoctrines` (folder +0x28, subdoctrine +0x30, country +0x3c). `--no-doctrines` turns it off.
 
@@ -250,7 +251,8 @@ Building lines are handle 59 (`CBuildingProductionLine`); railways (`CRailwayPro
 `bridge.write` of the ids seen before plus the next ones (new objects get higher ids), each new day and at once after
 a construction or trade command (`CAddConstructionCommand`, `CRemoveConstructionCommand`,
 `CChangeProductionLinePriorityCommand`, `CBuildRailwayCommand`, `CCreateTradeCommand`, `CSetAutoImport...`, ...):
-about a second. The first read probes every id (about 30 s). A building's location is a state id, or a province id
+about a second. The first read takes the lines and deals the memory scan finds (`shared.ids`) and walks up to the last id
+(a few seconds; without a scan it probes every id, about 30 s). A building's location is a state id, or a province id
 for buildings with `province_max` in `common/buildings`; owners come from memory (`hoi4ai.live.Provinces`). A deal's
 text names only the importer; the exporter is found in memory (the deal's +0x80 is the exporter's
 `CCountryResources`, at `CCountry` +0x11f8). Settings are read from the save-format block: the country each day,

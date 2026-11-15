@@ -63,6 +63,7 @@ def parse(line):
 
 class GeneralLog:
     def __init__(self, path, names=None, tags=(), others=lambda: ()):
+        shared.want(CLASS)
         from hoi4ai.eventrec import Names
         from hoi4ai.memory import Process
         from hoi4ai.templates import _string
