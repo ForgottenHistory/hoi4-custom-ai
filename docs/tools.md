@@ -117,6 +117,9 @@ Records every command the game executes (player and AI) while you play: turns on
 the in-game date into the record until Ctrl+C, which turns recording off. Each new in-game day it also snapshots
 every division (`bridge.snap`) into `unit_snapshots.tsv`: owner, province, order, organisation, strength,
 template. Two blocks a day: handle 51 (the divisions from the game's setup) and 4713 (divisions trained later).
+By default the AI's own bookkeeping commands are not recorded (`SKIP` in cmdrec.py: section blocks, force
+concentration, wanted division counts, pings; about half of a late game's record); `--skip` with no class records
+everything.
 
 The game is never paused. The main loop only polls the date and writes the marks; the state logs below run on a
 worker thread, one step at a time, each step covering every record line since the last one, so at speed 5 a step

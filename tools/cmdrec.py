@@ -77,6 +77,11 @@ def game_date(tag: str) -> str:
     return lines[0].strip() if lines else "?"
 
 
+# Commands only the AI sends, for its own bookkeeping (never the player's in campaign1 or kaiserredux1, apart from
+# CAiStoreTotalWantedNrDivisionsCommand, which the game sends for the player's country too). Half the record in a
+# late game, and each recorded command is written from the game's thread.
+SKIP = ("COrderBlockSectionsCommand", "CAiStoreTotalWantedNrDivisionsCommand", "CAiStoreForceConcentrationTargetCommand",
+        "CAiDiscardForceConcentrationTargetCommand", "CClientPingCommand")
 MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
           "November", "December"]
 # CArmy fields (see bridge.snap): owner, province, order id, org (+0x20, +0x28, +0x78: one is current, one max),
@@ -97,7 +102,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", help="folder for the record and snapshots (default: the HOI4 folder)")
     ap.add_argument("--tag", help="country to read the date with (default: the player's, else GER)")
-    ap.add_argument("--skip", nargs="*", default=[], help="command classes not to record")
+    ap.add_argument("--skip", nargs="*", default=list(SKIP),
+                    help=f"command classes not to record (default: the AI's own bookkeeping, {' '.join(SKIP)}; "
+                         "--skip with no class records them all)")
     ap.add_argument("--interval", type=float, default=0.25, help="seconds between date checks")
     ap.add_argument("--no-snap", action="store_true", help="no daily division snapshots")
     ap.add_argument("--no-plans", action="store_true", help="no battle-plan snapshots (plans.tsv)")
@@ -134,6 +141,9 @@ def main():
     tag = a.tag or (player if player != "none" else "GER")
     folder = os.path.abspath(a.dir) if a.dir else game_dir()
     os.makedirs(folder, exist_ok=True)
+    unskip = [c for c in SKIP if c not in a.skip]      # the bridge keeps its skip list until the game closes
+    if unskip:
+        send("bridge.cmdrec unskip " + " ".join(unskip))
     if a.skip:
         print(send("bridge.cmdrec skip " + " ".join(a.skip))[0])
     planrec.install_rules()

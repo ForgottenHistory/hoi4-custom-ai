@@ -41,6 +41,7 @@ Memory:
 """
 import re
 
+from hoi4ai import shared
 from hoi4bridge import send
 
 # bridge.cmdrec list CLASS PTR COUNT STRIDE: a vector's data pointer at PTR, its element count at COUNT
@@ -196,9 +197,41 @@ def snapshot(proc, army_ids):
     return rows
 
 
-def armies_of(tag, gap=1000):
-    """Ids of the country's armies (COrdersGroup, owner at +0x3c), found by asking for order ids 1, 2, ... until
-    GAP ids in a row name nothing (deleted orders leave holes). About a second for a few hundred orders."""
+_country_ids = {}      # tag -> country id (bridge.tag of the owners the scan found)
+
+
+def armies_of(tag, gap=1000, proc=None):
+    """Ids of the country's armies (COrdersGroup, owner's country id at +0x3c). With PROC from the memory scan
+    (shared.ids): the game's thread only answers a bridge.object per army that looks like TAG's (to drop stale
+    copies) and, once, a bridge.tag per owner id. Without PROC or a scan, by asking for order ids 1, 2, ... until
+    GAP ids in a row name nothing (deleted orders leave holes): late in a big game thousands of requests on the
+    game's thread (~30 s)."""
+    try:
+        scanned = shared.ids("COrdersGroup", 53) if proc is not None else {}
+    except Exception:
+        scanned = {}
+    if not scanned:
+        return _probe_armies(tag, gap)
+    owner = {oid: {_i32(proc, a + 0x3c) for a in addrs} for oid, addrs in scanned.items()}
+    if tag not in _country_ids:
+        ids = sorted({c for cs in owner.values() for c in cs if c is not None and 0 <= c < 100000})
+        for c, r in zip(ids, send(*[f"bridge.tag {c}" for c in ids]) if ids else []):
+            if r.startswith("OK") and "=" in r:
+                _country_ids.setdefault(r.split("=", 1)[1].strip(), c)
+    cid = _country_ids.get(tag)
+    cand = sorted(oid for oid, cs in owner.items() if cid in cs) if cid is not None else []
+    return [oid for oid, r in zip(cand, send(*[f"bridge.object 53 {k}" for k in cand]) if cand else [])
+            if r.startswith("OK COrdersGroup") and re.search(rf"\+0x3c={tag}\b", r)]
+
+
+def _i32(proc, addr):
+    try:
+        return proc.i32(addr)
+    except OSError:
+        return None
+
+
+def _probe_armies(tag, gap):
     out, miss, i = [], 0, 1
     while miss < gap:
         ids = list(range(i, i + 100))
@@ -227,6 +260,7 @@ class PlanLog:
         if new:
             self.f.write(HEADER + "\n")
         self.proc, self.armies, self.day, self.last = None, [], None, None
+        shared.want("COrdersGroup")
 
     def step(self, date):
         """DATE: "YYYY-MM-DD HH:00". Returns the rows written (0 if nothing changed)."""
@@ -234,7 +268,7 @@ class PlanLog:
             from hoi4ai.memory import Process
             self.proc = Process()
         if date[:10] != self.day:
-            self.armies, self.day = armies_of(self.tag), date[:10]
+            self.armies, self.day = armies_of(self.tag, proc=self.proc), date[:10]
         rows = snapshot(self.proc, self.armies)
         if rows == self.last:
             return 0
