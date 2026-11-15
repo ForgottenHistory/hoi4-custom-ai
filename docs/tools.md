@@ -460,6 +460,20 @@ tags `events.tsv` gives the same events. Each row takes the earliest unused matc
 between the log's previous read (less a day) and the row. A row with its command is never `auto`; the commands
 themselves are not separate examples.
 
+### `playstyle.py`
+
+    python tools/playstyle.py RECORDING_DIR [--out FILE]
+
+How the player played, for a report page: `playstyle.json` in the recording folder (run `examples.py` first). It
+holds the player's wars (the start is the game's own date of the war, from the `war_relation` value in
+`diplomacy.tsv`), the `country.tsv` series (factories, manpower, political power, stability, war support,
+states), per day the player's divisions with their mean strength and how many moved (`unit_snapshots.tsv`), per
+month the player's army commands by kind (move, rail, halt, battle plan, organise, air, other) and the military
+factories on each kind of equipment (replayed from `production_lines.tsv`), the focus picks with the day each
+finished, laws and advisors, decisions taken, research picks, event choices, templates and construction the player
+queued (dated as in `examples.jsonl`), and per war the army commands by kind in the 14 days before and after it
+started with the other choices made in those 14 days.
+
 ## Checking the data
 
 ### `audit.py`
