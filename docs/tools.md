@@ -424,6 +424,21 @@ divisions, mean strength, mean organisation (as a share of the highest seen for 
 moved since the last snapshot, divisions under a front or battle plan, and divisions lost since the first
 snapshot.
 
+### `examples.py`
+
+    python tools/examples.py RECORDING_DIR [--out FILE] [--tag GER]
+
+Training examples from a cmdrec recording: `examples.jsonl`, one JSON object per decision of the player (the
+record's `#mark player=`), with the state just before it. Decisions are the player's rows of the per-system logs
+that are not `start` (politics, research, construction, production lines, trade, logistics, deployment,
+diplomacy, naval, air, generals, ...), the battle plans of `plans.tsv` when an army's plan changes, and the
+player's own commands of `command_record.tsv` (per in-game hour and class, dated by the hourly ticks; noise
+classes left out). The state: the `country.tsv` row of the day before, the current focus, research slots, laws,
+war goals, wars and puppets, replayed from the logs. `auto: true` marks rows the game makes by itself (a focus or
+research finishing, construction done or repaired, deployments arriving, decisions becoming available, incoming
+offers, other countries buying, deals made while auto import is on); they are kept as context. A log row is dated
+when the recorder read it (a few days late at speed 5); the state is always from before that date.
+
 ## Checking the data
 
 ### `mapcheck.py`

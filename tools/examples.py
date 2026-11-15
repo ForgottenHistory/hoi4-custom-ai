@@ -1,0 +1,314 @@
+"""Training examples from a cmdrec recording: each of the player's decisions with the state just before it.
+
+    python examples.py RECORDING_DIR [--out FILE] [--tag GER]
+
+Writes RECORDING_DIR/examples.jsonl (or FILE), one JSON object per decision:
+  {"date": "1936-03-18 01:00", "source": "politics", "change": "changed", "auto": false,
+   "action": {"kind": "focus", "slot": "current", "value": "GER_prioritize_economic_growth", ...},
+   "state": {"country": {...country.tsv row of the day before...}, "focus": "...", "research": {...},
+             "laws": {...}, "wargoals": ["POL:take_state"], "at_war": [...], "puppets": [...]}}
+and prints a summary per source.
+
+Decisions come from the per-system logs (the rows of the player's country that are not "start") and from the
+player's own commands in command_record.tsv, grouped per in-game hour and class, each decoded: moves (division,
+province path, target and its state), rail moves (division, target), assignments to armies (army, divisions),
+battle-plan commands (hoi4ai.planrec.decode: front and offensive lines with their divisions and provinces), and the
+handles and lists the record holds for the rest. The tag is the record's "#mark player=".
+
+"auto" marks rows the game makes by itself rather than the player: a focus or research finishing, a construction
+done, its amount going down or a repair, a deployment arriving, a decision's state other than taken (active), an incoming offer appearing,
+a trade deal of another country buying from the player or made while auto import is on (a deal the player made
+then is counted as the game's: the logs can't tell them apart).
+They stay in the file (a model may want to see them as context) but are not the player's choices.
+
+A log row is dated when the recorder read it, which at speed 5 can be a few in-game days after the command.
+The state is taken from before the row's date, so it never shows the decision's own effect.
+"""
+import argparse
+import json
+import os
+import re
+import struct
+import sys
+from collections import Counter
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _bridge  # noqa: E402,F401  (puts hoi4bridge on the path)
+from hoi4ai import planrec  # noqa: E402
+from hoi4ai.clock import HOUR, Clock, parse  # noqa: E402
+
+GAME = r"C:\Program Files (x86)\Steam\steamapps\common\Hearts of Iron IV"
+
+# log: the columns that name a country the row is about (the player's row if any of them is the player)
+LOGS = {
+    "politics": ("country", None),
+    "research": ("country", None),
+    "construction": ("country", None),
+    "production_lines": ("owner", None),
+    "trade": ("exporter", "importer"),
+    "logistics": ("country", None),
+    "deployment": ("country", None),
+    "division_templates": ("owner", None),
+    "equipment_designs": ("owner", None),
+    "decisions": ("country", None),
+    "doctrines": ("country", None),
+    "mios": ("country", None),
+    "diplomacy": ("country", None),
+    "naval": ("country", None),
+    "air": ("country", None),
+    "generals": ("country", None),
+    "admirals": ("country", None),
+    "intelligence": ("country", None),
+    "occupation": ("country", None),
+    "spirits": ("country", None),
+    "market": ("seller", "buyer"),
+}
+NOISE = {"CAiStoreTotalWantedNrDivisionsCommand", "CClientPingCommand", "CHourlyTickCommand"}
+SKIP = {"date", "change", "was"}
+
+
+def when(text):
+    """datetime of a log date ("12:00, 1 January, 1936", "1936-01-02 07:00" or "1936-01-01")."""
+    text = text.strip()
+    if len(text) == 10:
+        text += " 00:00"
+    if text[10:13] == " 24":    # the day's end, as the game writes it
+        d, _ = parse(text[:10] + " 23" + text[13:])
+        return d and d + HOUR
+    d, _ = parse(text)
+    return d
+
+
+def rows(path):
+    with open(path, encoding="utf-8", errors="replace") as f:
+        head = f.readline().rstrip("\n").split("\t")
+        for line in f:
+            p = line.rstrip("\n").split("\t")
+            yield dict(zip(head, p + [""] * (len(head) - len(p))))
+
+
+def auto(src, r, state, tag):
+    ch = r.get("change")
+    if src == "trade" and r.get("deal") != "setting":
+        if r.get("exporter") == tag:
+            return True     # another country buying from the player (the AI asks, the game accepts)
+        if state.auto_import:
+            return True     # the game's auto import (it changes deals by itself); a player's deal can hide here
+    if ch in ("done", "deployed", "ignored"):
+        return True
+    if src == "politics" and r.get("kind") == "focus" and (r.get("slot") == "completed" or ch == "removed"):
+        return True
+    if src == "research" and ch == "changed" and not r.get("tech"):
+        return True     # the slot emptied: the tech finished
+    if src == "construction" and ch == "changed" and r.get("was", "").startswith("amount="):
+        try:
+            return int(r["amount"]) < int(r["was"].split("=", 1)[1].split(";")[0])
+        except ValueError:
+            return False
+    if src == "construction" and r.get("repair"):
+        return True     # a repair the game queues
+    if src == "decisions" and not r.get("value", "").startswith("active"):
+        return True     # became available, ignored, cooling down or gone; "active" is the player taking it
+    if src == "diplomacy" and r.get("kind") in ("incoming", "opinion"):
+        return True
+    return False
+
+
+class State:
+    """The player's state, replayed from the logs."""
+
+    def __init__(self):
+        self.country, self.focus, self.research, self.laws = {}, "", {}, {}
+        self.wargoals, self.wars, self.puppets, self.auto_import = set(), set(), set(), False
+
+    def apply(self, src, r):
+        removed = r.get("change") == "removed"
+        if src == "politics" and r.get("kind") == "focus" and r.get("slot") == "current":
+            self.focus = "" if removed else r.get("value", "")
+        elif src == "politics" and r.get("kind") == "law":
+            self.laws[r.get("slot", "")] = r.get("value", "")
+        elif src == "research" and r.get("slot"):     # (a "done" row has no slot)
+            self.research[r.get("slot", "")] = "" if removed else r.get("tech", "")
+        elif src == "diplomacy" and r.get("kind") == "wargoal":
+            (self.wargoals.discard if removed else self.wargoals.add)(f"{r.get('partner', '')}:{r.get('key', '')}")
+        elif src == "diplomacy" and r.get("kind") == "pact" and r.get("key") == "war_relation":
+            (self.wars.discard if removed else self.wars.add)(r.get("partner", ""))
+        elif src == "diplomacy" and r.get("kind") == "pact" and r.get("key") == "puppet":
+            (self.puppets.discard if removed else self.puppets.add)(r.get("partner", ""))
+        elif src == "trade" and r.get("resource") == "auto_import_enabled":
+            self.auto_import = r.get("amount") == "yes"
+
+    def snapshot(self):
+        return {"country": dict(self.country), "focus": self.focus,
+                "research": {k: v for k, v in sorted(self.research.items()) if v}, "laws": dict(self.laws),
+                "wargoals": sorted(self.wargoals), "at_war": sorted(self.wars),
+                "puppets": sorted(self.puppets)}
+
+
+def _handles(text):
+    """{offset: (type, id)} from the record's handles column (+0x38=51:30,+0x98=53:246)."""
+    out = {}
+    for h in text.split(",") if text not in ("", "-") else ():
+        off, _, v = h.partition("=")
+        t, _, i = v.partition(":")
+        try:
+            out[int(off.lstrip("+"), 16)] = (int(t), int(i))
+        except ValueError:
+            pass
+    return out
+
+
+def _lists(extra):
+    return {int(m.group(1), 16): [x for x in m.group(2).split(",") if x]
+            for m in re.finditer(r"L\+0x([0-9a-f]+)=\[([^\]]*)\]", extra or "")}
+
+
+def decode(cls, handles, hexdump, extra, states):
+    """What one command says (layouts: docs/game-layouts.md, hoi4ai/planrec.py): divisions, provinces, lines."""
+    d = planrec.decode(cls, hexdump, extra)
+    if d is not None:
+        for k in ("points", "provinces"):
+            if d.get(k):
+                d[k + "_states"] = sorted({states.get(x, "?") for x in d[k]})
+        return d
+    h, L = _handles(handles), _lists(extra)
+    b = bytes.fromhex(hexdump[:0x140])
+    i32 = lambda off: struct.unpack_from("<i", b, off)[0] if len(b) >= off + 4 else None  # noqa: E731
+    divs = lambda items: [int(x.split(":")[1]) for x in items if ":" in x]  # noqa: E731
+    if cls == "CMoveCommand":
+        path = [int(x) for x in L.get(0x40, [])]
+        d = {"division": h.get(0x38, (0, None))[1], "path": path}
+        if path:
+            d["to"], d["to_state"] = path[-1], states.get(path[-1], "?")
+        return d
+    if cls == "CStrategicRedeploymentCommand":
+        to = i32(0x40)
+        return {"division": h.get(0x38, (0, None))[1], "to": to, "to_state": states.get(to, "?")}
+    if cls in ("COrderAssignCommand", "COrderUnassignCommand"):
+        army = next((i for t, i in h.values() if t == 53), None)
+        return {"army": army, "divisions": divs(L.get(0x28, []))}
+    out = {}
+    if h:
+        out["handles"] = [f"{t}:{i}" for _, (t, i) in sorted(h.items())]
+    for off, items in sorted(L.items()):
+        out[f"list_{off:#x}"] = items
+    return out
+
+
+def commands(path, tag, states):
+    """[(datetime, class, [what each says])] of TAG's commands, per in-game hour and class."""
+    clock, player, out = Clock(), None, {}
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            date = clock.feed(line)
+            p = line.rstrip("\n").split("\t")
+            if p[0] == "#mark":
+                if len(p) > 2 and p[2].startswith("player="):
+                    player = p[2][7:]
+                continue
+            if p[0].startswith("#") or len(p) < 4 or p[2] in NOISE:
+                continue
+            if p[3] == (tag or player) and date and when(date):
+                what = decode(p[2], p[6] if len(p) > 6 else "-", p[7] if len(p) > 7 else "",
+                              p[8] if len(p) > 8 else "", states)
+                out.setdefault((when(date), p[2]), []).append(what)
+    return player, [(d, c, w) for (d, c), w in sorted(out.items(), key=lambda x: x[0])]
+
+
+def provinces_to_states(game):
+    """province id -> state name, from the game's history/states (empty without the game files)."""
+    try:
+        from analyze_cmdrec import load_geography
+        return load_geography(game)[0]
+    except (ImportError, OSError):
+        return {}
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    ap.add_argument("dir")
+    ap.add_argument("--out")
+    ap.add_argument("--tag", help="the player's tag (default: the record's #mark player=)")
+    ap.add_argument("--game", default=GAME, help="the game's folder (province -> state names)")
+    a = ap.parse_args()
+    rec = os.path.join(a.dir, "command_record.tsv")
+    states = provinces_to_states(a.game)
+    player, cmds = commands(rec, a.tag, states) if os.path.exists(rec) else (None, [])
+    tag = a.tag or player
+    if not tag:
+        sys.exit("no player tag: pass --tag")
+    if a.tag:
+        _, cmds = commands(rec, tag, states) if os.path.exists(rec) else (None, [])
+
+    events = []     # (datetime, order, kind, source, row)
+    for src, owners in LOGS.items():
+        path = os.path.join(a.dir, src + ".tsv")
+        if not os.path.exists(path):
+            continue
+        for r in rows(path):
+            if not any(r.get(o) == tag for o in owners if o):
+                continue
+            d = when(r.get("date", ""))
+            if d is not None:
+                events.append((d, 1, "log", src, r))
+    path = os.path.join(a.dir, "country.tsv")
+    if os.path.exists(path):
+        for r in rows(path):
+            d = when(r["date"])
+            if d is not None:     # read during that day: counts from the next day on
+                events.append((d.replace(hour=23, minute=59), 0, "country", "country", r))
+    path = os.path.join(a.dir, "plans.tsv")
+    if os.path.exists(path):
+        for r in rows(path):
+            d = when(r["date"])
+            if d is not None and r.get("army") not in ("-", ""):
+                events.append((d, 1, "log", "plans", r))
+    for d, cls, what in cmds:
+        events.append((d, 1, "command", "command", {"class": cls, "count": len(what), "orders": what}))
+    events.sort(key=lambda e: (e[0], e[1]))
+
+    state, out, counts = State(), [], Counter()
+    last_plan = {}
+    for d, _, kind, src, r in events:
+        if kind == "country":
+            state.country = {k: v for k, v in r.items() if k != "date"}
+            continue
+        if src == "plans":
+            key = r.get("army")
+            body = {k: v for k, v in r.items() if k != "date"}
+            if last_plan.get(key) == body:
+                continue
+            change = "new" if key not in last_plan else "changed"
+            last_plan[key] = body
+            out.append({"date": f"{d:%Y-%m-%d %H:%M}", "source": "plans", "change": change, "auto": False,
+                        "action": {k: v for k, v in body.items() if v}, "state": state.snapshot()})
+            counts[("plans", False)] += 1
+            continue
+        if kind == "command":
+            out.append({"date": f"{d:%Y-%m-%d %H:%M}", "source": "command", "change": "issued", "auto": False,
+                        "action": r, "state": state.snapshot()})
+            counts[("command", False)] += 1
+            continue
+        if r.get("change") == "start":
+            state.apply(src, r)
+            continue
+        is_auto = auto(src, r, state, tag)
+        out.append({"date": f"{d:%Y-%m-%d %H:%M}", "source": src, "change": r.get("change", ""), "auto": is_auto,
+                    "action": {k: v for k, v in r.items() if k not in SKIP and v},
+                    "was": r.get("was", ""), "state": state.snapshot()})
+        counts[(src, is_auto)] += 1
+        state.apply(src, r)
+
+    dest = a.out or os.path.join(a.dir, "examples.jsonl")
+    with open(dest, "w", encoding="utf-8") as f:
+        for e in out:
+            f.write(json.dumps(e, ensure_ascii=False) + "\n")
+    print(f"{tag}: {len(out)} examples -> {dest}")
+    print(f"{'source':20} {'player':>7} {'auto':>6}")
+    for src in sorted({s for s, _ in counts}, key=lambda s: -counts[(s, False)]):
+        print(f"{src:20} {counts[(src, False)]:7} {counts[(src, True)]:6}")
+
+
+if __name__ == "__main__":
+    main()
