@@ -42,6 +42,9 @@ Occupation (hoi4ai/occupationrec.py): occupation laws and garrison templates, gl
 per state, as they change, to occupation.tsv.
 Decisions (hoi4ai/decisionrec.py): the decisions taken and ignored (from the commands), and each country's running
 and available decisions and missions as they change, to decisions.tsv.
+Intelligence (hoi4ai/intelligencerec.py): each country's intelligence agency (creation, upgrades, name), its
+operatives and their missions, the operatives it can recruit, cryptology and operations, as they change, to
+intelligence.tsv.
 Logistics (hoi4ai/logisticsrec.py): fuel prioritization (army, air, navy: low / medium / high) and each army's
 motorization priority and exercises, of the country each day and of every other producing country each week, as it changes, to logistics.tsv.
 Training and deployment (hoi4ai/deploymentrec.py): the deployment orders and the divisions in training under them,
@@ -64,7 +67,7 @@ import threading
 import time
 
 import _bridge  # noqa: F401  (puts the hoi4-bridge client on the path)
-from hoi4ai import airrec, countryrec, decisionrec, deploymentrec, doctrinerec, diplomacyrec, economyrec, equipmentrec, eventrec, generalrec, logisticsrec, marketrec, miorec, navalrec, occupationrec, planrec, politicsrec, productionrec, researchrec, shared, spiritrec, templaterec
+from hoi4ai import airrec, countryrec, decisionrec, deploymentrec, doctrinerec, diplomacyrec, economyrec, equipmentrec, eventrec, generalrec, intelligencerec, logisticsrec, marketrec, miorec, navalrec, occupationrec, planrec, politicsrec, productionrec, researchrec, shared, spiritrec, templaterec
 from hoi4ai.gamefiles import game_dir
 from hoi4bridge import BridgeError, BridgeUnavailable, player_tag, query, send
 
@@ -112,6 +115,7 @@ def main():
     ap.add_argument("--no-diplomacy", action="store_true", help="no diplomacy log (diplomacy.tsv)")
     ap.add_argument("--no-occupation", action="store_true", help="no occupation law and garrison log (occupation.tsv)")
     ap.add_argument("--no-decisions", action="store_true", help="no decision log (decisions.tsv)")
+    ap.add_argument("--no-intelligence", action="store_true", help="no intelligence agency log (intelligence.tsv)")
     ap.add_argument("--no-logistics", action="store_true", help="no logistics settings log (logistics.tsv)")
     ap.add_argument("--no-deployment", action="store_true", help="no training and deployment log (deployment.tsv)")
     ap.add_argument("--no-generals", action="store_true", help="no generals log (generals.tsv)")
@@ -164,6 +168,8 @@ def main():
         os.path.join(folder, "occupation.tsv"), events.names, [tag], lambda: mios.others if mios else ())
     decisions = None if a.no_decisions else decisionrec.DecisionLog(
         os.path.join(folder, "decisions.tsv"), events.names, [tag], lambda: mios.others if mios else ())
+    intelligence = None if a.no_intelligence else intelligencerec.IntelligenceLog(
+        os.path.join(folder, "intelligence.tsv"), events.names, [tag], lambda: mios.others if mios else ())
     logistics = None if a.no_logistics else logisticsrec.LogisticsLog(
         os.path.join(folder, "logistics.tsv"), events.names, [tag], lambda: mios.others if mios else ())
     deployment = None if a.no_deployment else deploymentrec.DeploymentLog(
@@ -183,7 +189,7 @@ def main():
                                    ("mios", mios), ("market", market), ("doctrines", doctrines),
                                    ("spirits", spirits), ("politics", politics), ("economy", economy),
                                    ("diplomacy", diplomacy), ("occupation", occupation),
-                                   ("decisions", decisions),
+                                   ("decisions", decisions), ("intelligence", intelligence),
                                    ("logistics", logistics), ("deployment", deployment),
                                    ("generals", generals), ("air", air), ("naval", naval), ("research", research))
                if v]

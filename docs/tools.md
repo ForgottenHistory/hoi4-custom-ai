@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), national focus, laws, advisors and national spirits (`politics.tsv`), construction lines (`construction.tsv`), trade deals and auto-import settings (`trade.tsv`), pacts, wars, wargoals and factions (`diplomacy.tsv`), occupation laws and garrison templates (`occupation.tsv`), decisions taken, ignored, running and available (`decisions.tsv`), fuel prioritization, army motorization and exercises (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), air wings (`air.tsv`), task forces and admirals (`naval.tsv`, `admirals.tsv`), research slots and finished techs (`research.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), national focus, laws, advisors and national spirits (`politics.tsv`), construction lines (`construction.tsv`), trade deals and auto-import settings (`trade.tsv`), pacts, wars, wargoals and factions (`diplomacy.tsv`), occupation laws and garrison templates (`occupation.tsv`), decisions taken, ignored, running and available (`decisions.tsv`), the intelligence agency, operatives and operations (`intelligence.tsv`), fuel prioritization, army motorization and exercises (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), air wings (`air.tsv`), task forces and admirals (`naval.tsv`, `admirals.tsv`), research slots and finished techs (`research.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -303,6 +303,19 @@ ignore list (`ignored`), from `decision_status={ active_timed_decision={...} act
 `player_settings={ ignore_decisions={...} }` in the save-format block; the days
 left don't count as a change. Read for the country each day, other producing countries spread over 7 days, and the
 country at once after a decision command. `--no-decisions` turns it off.
+
+Intelligence (`hoi4ai/intelligencerec.py`): `intelligence.tsv` gets each country's intelligence agency at the first
+read (`start`) and each part added, changed or removed: date, change, country, kind, key, value, was. Kinds: `agency`
+(name, icon, `is_created`, defense, operative slots, the upgrade being built, ...), `upgrade` (each upgrade's level),
+`operative` (an operative's mission and target, `MISSION>TARGET skill=N traits=...`), `recruitable` (the operatives
+on offer, with their traits), `cryptology` (key the target country, `decryption=yes` while decrypting it) and `operation` (the operations priority; a running operation keyed `TYPE>TARGET`, value its auto commence,
+completed, operative count and phases; `finished TYPE` with the targets and counts). From
+`intelligence_agency={...}` and `operations={...}` in the save-format block; every country has an agency block,
+also before it builds one. Progress that moves by itself (`building`, `upgrade_progress`, the next slot's days,
+experience, trait progress, a mission's state, the amount decrypted) is left out. Read for the country each day, other producing countries
+spread over 7 days, and the country at once after an intelligence command (`CIntelligenceAgencyCreationCommand`,
+`CIntelligenceAgencyUpgradeCommand`, `CRecruitOperativeCommand`, `CSetOperativeMissionCommand`,
+`CStartStopDecryptionCommand`, `CCreateOperationCommand`, ...). `--no-intelligence` turns it off.
 
 Logistics (`hoi4ai/logisticsrec.py`): `logistics.tsv` gets each country's fuel prioritization and each army's
 motorization priority and exercises at its first read and then each change: date, change (`start`, `new`, `changed`, `removed`),
