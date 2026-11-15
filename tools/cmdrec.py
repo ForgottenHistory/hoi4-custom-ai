@@ -204,22 +204,27 @@ def main():
     def step(d):
         day = day_label(d)
         hour = re.match(r"(\d+):", d)
+        timing, t0 = [], time.perf_counter()
         if plans and day and hour:
             try:
                 plans.step(f"{day} {int(hour.group(1)):02d}:00")
             except (OSError, BridgeError, BridgeUnavailable) as e:
                 print("plans:", e)
+        timing.append(("plans", time.perf_counter() - t0))
+        t0 = time.perf_counter()
         if country and day:
             try:
                 country.step(day)
             except (OSError, BridgeError, BridgeUnavailable, RuntimeError) as e:
                 print("country:", e)
+        timing.append(("country", time.perf_counter() - t0))
+        t0 = time.perf_counter()
         try:
             events.step()   # the marks flushed the record
         except (OSError, BridgeError, BridgeUnavailable) as e:
             print("events:", e)
+        timing.append(("events", time.perf_counter() - t0))
         shared.new_step(day)
-        timing = []
         for name, log in loggers:
             d = latest["date"] or d     # the game moves on while the logs read: date the rows when read
             t0 = time.perf_counter()
