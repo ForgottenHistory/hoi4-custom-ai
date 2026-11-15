@@ -52,6 +52,9 @@ FULL_DAYS = 7
 PROBE = 300                 # ids past the highest to look at, finding them all
 AHEAD = 50                  # building lines: ids past the highest to look at each read
 AHEAD_4713 = 100            # handle 4713 (deals, railways, generals, convoys, ...) fills faster
+FILLERS_4713 = ("CArmy", "CArmyLeader", "CNavyLeader", "COperativeLeader", "CCountryAirContainer", "CAirWingPool",
+                "CResourceOrigin", "CWarGoal", "CIncomingDiplomaticAction", "CLendLeaseExchange",
+                "CEquipmentConvoyClient@NInternationalMarket")    # the other classes of 4713: its last id from the scan
 CONSTRUCTION = ("CAddConstructionCommand", "CRemoveConstructionCommand", "CRemoveAllConstructionCommand",
                 "CConvertFactoryCommand", "CReplaceBuildingCommand", "CRemoveBuildingLevelCommand",
                 "CChangeProductionLinePriorityCommand", "CSetProductionLinePriorityCommand",
@@ -130,11 +133,11 @@ def write_objects(handle, ids):
 class _Ids:
     """The live ids of one handle: those seen before plus the ones past the highest."""
 
-    def __init__(self, handle, ahead, classes=()):
-        self.handle, self.ahead, self.classes = handle, ahead, classes
+    def __init__(self, handle, ahead, classes=(), fillers=()):
+        self.handle, self.ahead, self.classes, self.fillers = handle, ahead, classes, fillers
         self.ids, self.top = set(), 0
-        if classes:
-            shared.want(*classes)
+        if classes or fillers:
+            shared.want(*classes, *fillers)
 
     def _scanned(self):
         """The ids of CLASSES from the memory scan, or None without one."""
@@ -152,6 +155,11 @@ class _Ids:
         if scanned:
             found = write_objects(self.handle, scanned)
             self.top = max(found or [0])
+            try:            # the handle's other objects: start the walk near its last id (not stale: below it)
+                filled = [i for c in self.fillers for i in shared.ids(c, self.handle)]
+                self.top = max([self.top] + sorted(filled)[-50:-1])
+            except Exception:
+                pass
             while True:     # up from the highest to the handle's last id
                 batch = write_objects(self.handle, range(self.top + 1, self.top + 1 + PROBE))
                 found.update(batch)
@@ -169,9 +177,9 @@ class _Ids:
                 lo += PROBE
         else:
             found = write_objects(self.handle, self.ids | set(range(self.top + 1, self.top + 1 + self.ahead)))
-            while found and max(found) > self.top:
+            while found and max(found) > self.top:      # many new objects: walk on PROBE at a time
                 self.top = max(found)
-                found.update(write_objects(self.handle, range(self.top + 1, self.top + 1 + self.ahead)))
+                found.update(write_objects(self.handle, range(self.top + 1, self.top + 1 + PROBE)))
         self.ids = {i for i, (cls, _) in found.items() if keep(cls)}
         return found
 
@@ -194,7 +202,7 @@ class EconomyLog:
         self.provinces, self.proc = None, None
         self.state_owner = {}
         self.lines = _Ids(59, AHEAD, ("CBuildingProductionLine",))
-        self.objects = _Ids(4713, AHEAD_4713, ("CResourceExchange", "CRailwayProductionLine"))
+        self.objects = _Ids(4713, AHEAD_4713, ("CResourceExchange", "CRailwayProductionLine"), FILLERS_4713)
         shared.want("CCountry")
         self.held = None            # line key -> row fields
         self.deals = None           # deal id -> (exporter, importer, resource, amount, factories, started)
