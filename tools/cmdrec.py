@@ -121,6 +121,8 @@ def main():
     ap.add_argument("--no-generals", action="store_true", help="no generals log (generals.tsv)")
     ap.add_argument("--no-air", action="store_true", help="no air wing log (air.tsv)")
     ap.add_argument("--no-naval", action="store_true", help="no navy log (naval.tsv, admirals.tsv)")
+    ap.add_argument("--only-player", action="store_true",
+                    help="the state logs read only the player's country, not the others every 7 days")
     ap.add_argument("--profile", action="store_true", help="print how long each log's step takes")
     ap.add_argument("--no-research", action="store_true", help="no research log (research.tsv)")
     a = ap.parse_args()
@@ -151,38 +153,43 @@ def main():
     production = None if a.no_production else productionrec.ProductionLog(
         os.path.join(folder, "production_lines.tsv"), events.names)
     mios = None if a.no_mios else miorec.MioLog(os.path.join(folder, "mios.tsv"), [tag])
+    if mios and a.only_player:
+        mios.others = []            # no other countries to find or read
+
+    def others():
+        return () if a.only_player or not mios else mios.others
     market = None if a.no_market else marketrec.MarketLog(os.path.join(folder, "market.tsv"), events.names, [tag],
-                                                          lambda: mios.others if mios else ())
+                                                          others)
     doctrines = None if a.no_doctrines else doctrinerec.DoctrineLog(os.path.join(folder, "doctrines.tsv"),
                                                                     events.names)
     spirits = None if a.no_spirits else spiritrec.SpiritLog(os.path.join(folder, "spirits.tsv"), events.names, [tag],
-                                                            lambda: mios.others if mios else ())
+                                                            others)
     politics = None if a.no_politics else politicsrec.PoliticsLog(
-        os.path.join(folder, "politics.tsv"), events.names, [tag], lambda: mios.others if mios else ())
+        os.path.join(folder, "politics.tsv"), events.names, [tag], others)
     economy = None if a.no_economy else economyrec.EconomyLog(
         os.path.join(folder, "construction.tsv"), os.path.join(folder, "trade.tsv"), events.names, [tag],
-        lambda: mios.others if mios else ())
+        others)
     diplomacy = None if a.no_diplomacy else diplomacyrec.DiplomacyLog(
-        os.path.join(folder, "diplomacy.tsv"), events.names, [tag], lambda: mios.others if mios else ())
+        os.path.join(folder, "diplomacy.tsv"), events.names, [tag], others)
     occupation = None if a.no_occupation else occupationrec.OccupationLog(
-        os.path.join(folder, "occupation.tsv"), events.names, [tag], lambda: mios.others if mios else ())
+        os.path.join(folder, "occupation.tsv"), events.names, [tag], others)
     decisions = None if a.no_decisions else decisionrec.DecisionLog(
-        os.path.join(folder, "decisions.tsv"), events.names, [tag], lambda: mios.others if mios else ())
+        os.path.join(folder, "decisions.tsv"), events.names, [tag], others)
     intelligence = None if a.no_intelligence else intelligencerec.IntelligenceLog(
-        os.path.join(folder, "intelligence.tsv"), events.names, [tag], lambda: mios.others if mios else ())
+        os.path.join(folder, "intelligence.tsv"), events.names, [tag], others)
     logistics = None if a.no_logistics else logisticsrec.LogisticsLog(
-        os.path.join(folder, "logistics.tsv"), events.names, [tag], lambda: mios.others if mios else ())
+        os.path.join(folder, "logistics.tsv"), events.names, [tag], others)
     deployment = None if a.no_deployment else deploymentrec.DeploymentLog(
-        os.path.join(folder, "deployment.tsv"), events.names, [tag], lambda: mios.others if mios else ())
+        os.path.join(folder, "deployment.tsv"), events.names, [tag], others)
     generals = None if a.no_generals else generalrec.GeneralLog(
-        os.path.join(folder, "generals.tsv"), events.names, [tag], lambda: mios.others if mios else ())
+        os.path.join(folder, "generals.tsv"), events.names, [tag], others)
     air = None if a.no_air else airrec.AirLog(
-        os.path.join(folder, "air.tsv"), events.names, [tag], lambda: mios.others if mios else ())
+        os.path.join(folder, "air.tsv"), events.names, [tag], others)
     naval = None if a.no_naval else navalrec.NavalLog(
         os.path.join(folder, "naval.tsv"), os.path.join(folder, "admirals.tsv"), events.names, [tag],
-        lambda: mios.others if mios else ())
+        others)
     research = None if a.no_research else researchrec.ResearchLog(
-        os.path.join(folder, "research.tsv"), events.names, [tag], lambda: mios.others if mios else ())
+        os.path.join(folder, "research.tsv"), events.names, [tag], others)
     plans = None if a.no_plans else planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = None if a.no_country else countryrec.CountryLog(folder, tag)
     loggers = [(n, v) for n, v in (("templates", templates), ("designs", designs), ("production", production),
