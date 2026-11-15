@@ -447,10 +447,34 @@ their state names from the game files through the mods in the recording's `dlc_l
 of the launcher's at the start), else the mods active now. The state: the `country.tsv` row of the day before, the current focus, research slots, laws,
 war goals, wars and puppets, replayed from the logs. `auto: true` marks rows the game makes by itself (a focus or
 research finishing, construction done or repaired, deployments arriving, decisions becoming available, incoming
-offers, other countries buying, deals made while auto import is on); they are kept as context. A log row is dated
-when the recorder read it (a few days late at speed 5); the state is always from before that date.
+offers, other countries buying, deals made while auto import is on); they are kept as context. A decision taken
+(`decisions`, `taken`) is the player's.
+
+A log row is dated when the recorder read it, and the logs are read only every few in-game days (3-13 in the
+Kaiserredux run, growing as the game got busier). Where the record holds the command behind a row, the row takes
+the command's hour instead (`"logged"` keeps the log's date) and its state is from before that hour: focus picks
+(`CSetNationalFocusCommand`), research (`CSetResearchCommand`), decisions taken, construction and railways, laws
+and advisors (`CAddIdeaCommand`, `CReplaceIdeaCommand`) and trade deals. These commands hold their country's id at
++0x28 (the record has no owner for them); ids get their tags offline, from the record's event commands and the
+tags `events.tsv` gives the same events. Each row takes the earliest unused matching command of the player
+between the log's previous read (less a day) and the row. A row with its command is never `auto`; the commands
+themselves are not separate examples.
 
 ## Checking the data
+
+### `audit.py`
+
+    python tools/audit.py RECORDING_DIR [--tag NGR] [--json FILE]
+
+Run it on every new recording, after `examples.py`, before analysing the data. One pass over the folder (a few
+minutes for a 600 MB run) reports: the record's in-game span, real seconds per in-game day by quarter, save
+reloads (the date going back), the player's commands by class, the commands with no owner and how many
+`unit_snapshots.tsv` credits to the player or another country; the snapshots' missing days, the player's
+divisions over time and sudden drops; per log the rows (all, the player's), first and last date, months with no
+row of the player, and how often it was read (median hours between reads per quarter); `country.tsv`'s cadence,
+gaps and columns that never change, and whether its `country/DAY.txt.gz` dumps read; the examples per source and
+quarter, and the log rows dated by their command with how far they moved. Problems end the report as `WARN` lines;
+`--json` writes all the numbers (for a report page).
 
 ### `mapcheck.py`
 

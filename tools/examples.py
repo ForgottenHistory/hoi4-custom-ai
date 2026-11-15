@@ -25,10 +25,13 @@ a trade deal of another country buying from the player or made while auto import
 then is counted as the game's: the logs can't tell them apart).
 They stay in the file (a model may want to see them as context) but are not the player's choices.
 
-A log row is dated when the recorder read it, which at speed 5 can be a few in-game days after the command.
-The state is taken from before the row's date, so it never shows the decision's own effect.
+A log row is dated when the recorder read it, which can be days after the change (3-13 in-game days in a busy game).
+Where the record holds the command behind it (COUNTRY_AT_28: focus, research, decisions, construction, laws and
+advisors, trade), the row takes the command's hour and keeps the log's date as "logged". The state is taken from
+before the row's date, so it doesn't show the decision's own effect (for rows not re-dated, unless the read came late).
 """
 import argparse
+import datetime
 import json
 import os
 import re
@@ -71,6 +74,27 @@ LOGS = {
 }
 NOISE = {"CAiStoreTotalWantedNrDivisionsCommand", "CClientPingCommand", "CHourlyTickCommand"}
 SKIP = {"date", "change", "was"}
+
+# Commands that hold their country's id at +0x28 (the record has no owner for them, or a wrong one), with the log
+# and the rows of it each one makes. A log is read only every few in-game days (more when the game is busy), so such
+# a row is dated by its command: the player's command of a matching class since the log's previous read.
+_FOCUS = ("politics", lambda r: r.get("kind") == "focus" and r.get("slot") == "current"
+          and r.get("change") in ("new", "changed"))
+_DECISION = ("decisions", lambda r: r.get("change") == "taken" or r.get("value", "").startswith("active"))
+_BUILD = ("construction", lambda r: r.get("change") == "new")
+_IDEA = ("politics", lambda r: r.get("kind") in ("law", "advisor") and r.get("change") in ("new", "changed"))
+COUNTRY_AT_28 = {
+    "CSetNationalFocusCommand": _FOCUS,
+    "CSetResearchCommand": ("research", lambda r: r.get("change") in ("new", "changed") and bool(r.get("tech"))),
+    "CSelectDecisionCommand": _DECISION,
+    "CSelectTargetedDecisionCommand": _DECISION,
+    "CAddConstructionCommand": _BUILD,
+    "CBuildRailwayCommand": _BUILD,
+    "CAddIdeaCommand": _IDEA,
+    "CReplaceIdeaCommand": _IDEA,
+    "CCreateTradeCommand": ("trade", lambda r: r.get("change") == "new"),
+}
+SLACK = datetime.timedelta(days=1)     # a read is dated when it starts; the game moves on while it reads
 
 
 def when(text):
@@ -115,8 +139,8 @@ def auto(src, r, state, tag):
             return False
     if src == "construction" and r.get("repair"):
         return True     # a repair the game queues
-    if src == "decisions" and not r.get("value", "").startswith("active"):
-        return True     # became available, ignored, cooling down or gone; "active" is the player taking it
+    if src == "decisions" and ch != "taken" and not r.get("value", "").startswith("active"):
+        return True     # became available, ignored, cooling down or gone; "taken" / "active" is the player taking it
     if src == "diplomacy" and r.get("kind") in ("incoming", "opinion"):
         return True
     return False
@@ -246,14 +270,26 @@ def player_of(path):
 
 
 def commands(path, tag, states, owners):
-    """[(datetime, class, [what each says])] of TAG's commands, per in-game hour and class. A command the record
-    has no owner for is TAG's when a division it names is TAG's (OWNERS: from unit_snapshots)."""
-    clock, out = Clock(), {}
+    """([(datetime, class, [what each says])] of TAG's commands, per in-game hour and class,
+    [(datetime, class, country id)] of the COUNTRY_AT_28 commands, {event seq: country id}).
+    A command the record has no owner for is TAG's when a division it names is TAG's (OWNERS: from unit_snapshots)."""
+    from hoi4ai import eventrec
+    clock, out, country_cmds, event_ids = Clock(), {}, [], {}
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             date = clock.feed(line)
             p = line.rstrip("\n").split("\t")
             if p[0].startswith("#") or len(p) < 8 or p[2] in NOISE or not date or not when(date):
+                continue
+            if p[2] == eventrec.CLASS:
+                e = eventrec.parse(line)
+                if e:
+                    event_ids[e[0]] = e[3]
+                continue
+            if p[2] in COUNTRY_AT_28:
+                if len(p[7]) >= 0x2c * 2:
+                    cid = struct.unpack_from("<i", bytes.fromhex(p[7][0x50:0x58]))[0]
+                    country_cmds.append((when(date), p[2], cid))
                 continue
             extra = p[8] if len(p) > 8 else ""
             if p[3] == tag or (p[3] == "-" and owner_of(p[2], p[6], p[7], extra, owners) == tag):
@@ -261,7 +297,43 @@ def commands(path, tag, states, owners):
                 if p[3] == "-":
                     what["owner_from"] = "divisions"
                 out.setdefault((when(date), p[2]), []).append(what)
-    return [(d, c, w) for (d, c), w in sorted(out.items(), key=lambda x: x[0])]
+    return [(d, c, w) for (d, c), w in sorted(out.items(), key=lambda x: x[0])], country_cmds, event_ids
+
+
+def country_tags(event_ids, events_path):
+    """{country id: tag}, offline: the record's event commands name the country by id, events.tsv by tag."""
+    seen = {}
+    if os.path.exists(events_path):
+        for r in rows(events_path):
+            cid = event_ids.get(int(r["seq"])) if r.get("seq", "").isdigit() else None
+            if cid is not None:
+                seen.setdefault(cid, Counter())[r["country"]] += 1
+    return {cid: c.most_common(1)[0][0] for cid, c in seen.items()}
+
+
+def retime(log_rows, cmds, polls):
+    """Date the player's log rows by their commands. LOG_ROWS: [(datetime, source, row)]; CMDS: [(datetime, class)]
+    of the player's COUNTRY_AT_28 commands; POLLS: {source: sorted read dates}. Returns {id(row): command datetime}:
+    each row takes the earliest unused command of a matching class between the log's previous read (less SLACK)
+    and the row."""
+    import bisect
+    out, used = {}, set()
+    cmds = sorted(cmds)
+    for d, src, r in sorted(log_rows, key=lambda x: x[0]):
+        classes = {c for c, (s, test) in COUNTRY_AT_28.items() if s == src and test(r)}
+        if not classes:
+            continue
+        reads = polls.get(src, [])
+        i = bisect.bisect_left(reads, d)
+        since = (reads[i - 1] if i else d - datetime.timedelta(days=30)) - SLACK
+        for k, (t, c) in enumerate(cmds):
+            if t > d:
+                break
+            if k not in used and c in classes and t >= since:
+                used.add(k)
+                out[id(r)] = t
+                break
+    return out
 
 
 def provinces_to_states(game, load=None):
@@ -295,19 +367,30 @@ def main():
         sys.exit("no player tag: pass --tag")
     owners = division_owners(os.path.join(a.dir, "unit_snapshots.tsv"))
     states = provinces_to_states(a.game, os.path.join(a.dir, "dlc_load.json"))
-    cmds = commands(rec, tag, states, owners) if os.path.exists(rec) else []
+    cmds, country_cmds, event_ids = commands(rec, tag, states, owners) if os.path.exists(rec) else ([], [], {})
+    tags = country_tags(event_ids, os.path.join(a.dir, "events.tsv"))
+    mine = [(t, c) for t, c, cid in country_cmds if tags.get(cid) == tag]
 
-    events = []     # (datetime, order, kind, source, row)
+    events, log_rows, polls = [], [], {}     # events: (datetime, order, kind, source, row)
     for src, owners in LOGS.items():
         path = os.path.join(a.dir, src + ".tsv")
         if not os.path.exists(path):
             continue
+        reads = set()
         for r in rows(path):
-            if not any(r.get(o) == tag for o in owners if o):
-                continue
             d = when(r.get("date", ""))
             if d is not None:
-                events.append((d, 1, "log", src, r))
+                reads.add(d)
+            if d is None or not any(r.get(o) == tag for o in owners if o):
+                continue
+            log_rows.append((d, src, r))
+        polls[src] = sorted(reads)
+    timed = retime([x for x in log_rows if x[2].get("change") != "start"], mine, polls)
+    for d, src, r in log_rows:
+        if id(r) in timed:
+            r["_logged"] = d
+            d = timed[id(r)]
+        events.append((d, 1, "log", src, r))
     path = os.path.join(a.dir, "country.tsv")
     if os.path.exists(path):
         for r in rows(path):
@@ -349,10 +432,14 @@ def main():
         if r.get("change") == "start":
             state.apply(src, r)
             continue
-        is_auto = auto(src, r, state, tag)
-        out.append({"date": f"{d:%Y-%m-%d %H:%M}", "source": src, "change": r.get("change", ""), "auto": is_auto,
-                    "action": {k: v for k, v in r.items() if k not in SKIP and v},
-                    "was": r.get("was", ""), "state": state.snapshot()})
+        logged = r.pop("_logged", None)
+        is_auto = auto(src, r, state, tag) and not logged     # a row with its command is the player's
+        e = {"date": f"{d:%Y-%m-%d %H:%M}", "source": src, "change": r.get("change", ""), "auto": is_auto,
+             "action": {k: v for k, v in r.items() if k not in SKIP and v},
+             "was": r.get("was", ""), "state": state.snapshot()}
+        if logged:
+            e["logged"] = f"{logged:%Y-%m-%d %H:%M}"   # the log's date; "date" is the command's
+        out.append(e)
         counts[(src, is_auto)] += 1
         state.apply(src, r)
 
@@ -361,6 +448,8 @@ def main():
         for e in out:
             f.write(json.dumps(e, ensure_ascii=False) + "\n")
     print(f"{tag}: {len(out)} examples -> {dest}")
+    print(f"country ids from events: {len(tags)}; the player's country commands: {len(mine)}, "
+          f"{len(timed)} matched to a log row (dated by the command)")
     print(f"{'source':20} {'player':>7} {'auto':>6}")
     for src in sorted({s for s, _ in counts}, key=lambda s: -counts[(s, False)]):
         print(f"{src:20} {counts[(src, False)]:7} {counts[(src, True)]:6}")
