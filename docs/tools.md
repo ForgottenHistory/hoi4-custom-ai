@@ -474,6 +474,18 @@ finished, laws and advisors, decisions taken, research picks, event choices, tem
 queued (dated as in `examples.jsonl`), and per war the army commands by kind in the 14 days before and after it
 started with the other choices made in those 14 days.
 
+### `orbat.py`
+
+    python tools/orbat.py RECORDING_DIR TAG [--json FILE] [--step 3]
+
+The forces of one country (the AI's or the player's) as markdown tables, every `--step` months: the division
+templates as they changed (`division_templates.tsv`), divisions per template (`unit_snapshots.tsv`), factories
+on lines per kind of equipment (`production_lines.tsv`, as `playstyle.py` replays it) and the air force, wings and
+planes per role and per aircraft model (`air.tsv`). A wing's equipment id is looked up in `equipment_designs.tsv`
+and the role comes from its airframe (small_plane, ..._cas, medium, large, naval_bomber, `cv_` for carrier), not
+the wing's name. A design missing from `equipment_designs.tsv` is counted under its id and role "other".
+`--json` writes the same numbers.
+
 ### `campaignmap.py`
 
     python tools/campaignmap.py RECORDING_DIR [--save SAVE.hoi4 ...] [--tag NGR] [--pad 60] [--gif] [--out FILE]
