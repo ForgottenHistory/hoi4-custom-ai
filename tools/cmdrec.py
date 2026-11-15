@@ -32,6 +32,10 @@ other producing country each week, as they are picked and replaced, to spirits.t
 Politics (hoi4ai/politicsrec.py): the national focus (current, paused, completed), laws, advisors and national
 spirits of the country each day and of every other producing country each week, and of a country at once after its
 focus, law or advisor command, to politics.tsv.
+Economy (hoi4ai/economyrec.py): every country's construction lines, buildings and railways (building, state,
+levels, place in the queue, progress) as they are queued, change and end, to construction.tsv; every trade deal
+between any two countries (exporter, importer, resource, amount, factories) as it starts, changes and ends, and the
+auto-import settings, to trade.tsv.
 Logistics (hoi4ai/logisticsrec.py): fuel prioritization (army, air, navy: low / medium / high) and each army's
 motorization priority and exercises, of the country each day and of every other producing country each week, as it changes, to logistics.tsv.
 Training and deployment (hoi4ai/deploymentrec.py): the deployment orders and the divisions in training under them,
@@ -54,7 +58,7 @@ import threading
 import time
 
 import _bridge  # noqa: F401  (puts the hoi4-bridge client on the path)
-from hoi4ai import airrec, countryrec, deploymentrec, doctrinerec, equipmentrec, eventrec, generalrec, logisticsrec, marketrec, miorec, navalrec, planrec, politicsrec, productionrec, researchrec, shared, spiritrec, templaterec
+from hoi4ai import airrec, countryrec, deploymentrec, doctrinerec, economyrec, equipmentrec, eventrec, generalrec, logisticsrec, marketrec, miorec, navalrec, planrec, politicsrec, productionrec, researchrec, shared, spiritrec, templaterec
 from hoi4ai.gamefiles import game_dir
 from hoi4bridge import BridgeError, BridgeUnavailable, player_tag, query, send
 
@@ -97,6 +101,8 @@ def main():
     ap.add_argument("--no-doctrines", action="store_true", help="no doctrine log (doctrines.tsv)")
     ap.add_argument("--no-spirits", action="store_true", help="no officer corps spirit log (spirits.tsv)")
     ap.add_argument("--no-politics", action="store_true", help="no focus, law and advisor log (politics.tsv)")
+    ap.add_argument("--no-economy", action="store_true",
+                    help="no construction and trade logs (construction.tsv, trade.tsv)")
     ap.add_argument("--no-logistics", action="store_true", help="no logistics settings log (logistics.tsv)")
     ap.add_argument("--no-deployment", action="store_true", help="no training and deployment log (deployment.tsv)")
     ap.add_argument("--no-generals", action="store_true", help="no generals log (generals.tsv)")
@@ -140,6 +146,9 @@ def main():
                                                             lambda: mios.others if mios else ())
     politics = None if a.no_politics else politicsrec.PoliticsLog(
         os.path.join(folder, "politics.tsv"), events.names, [tag], lambda: mios.others if mios else ())
+    economy = None if a.no_economy else economyrec.EconomyLog(
+        os.path.join(folder, "construction.tsv"), os.path.join(folder, "trade.tsv"), events.names, [tag],
+        lambda: mios.others if mios else ())
     logistics = None if a.no_logistics else logisticsrec.LogisticsLog(
         os.path.join(folder, "logistics.tsv"), events.names, [tag], lambda: mios.others if mios else ())
     deployment = None if a.no_deployment else deploymentrec.DeploymentLog(
@@ -157,7 +166,8 @@ def main():
     country = None if a.no_country else countryrec.CountryLog(folder, tag)
     loggers = [(n, v) for n, v in (("templates", templates), ("designs", designs), ("production", production),
                                    ("mios", mios), ("market", market), ("doctrines", doctrines),
-                                   ("spirits", spirits), ("politics", politics), ("logistics", logistics), ("deployment", deployment),
+                                   ("spirits", spirits), ("politics", politics), ("economy", economy),
+                                   ("logistics", logistics), ("deployment", deployment),
                                    ("generals", generals), ("air", air), ("naval", naval), ("research", research))
                if v]
     send(f"bridge.cmdrec mark player={player}")

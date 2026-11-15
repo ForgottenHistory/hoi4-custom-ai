@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), national focus, laws, advisors and national spirits (`politics.tsv`), fuel prioritization, army motorization and exercises (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), air wings (`air.tsv`), task forces and admirals (`naval.tsv`, `admirals.tsv`), research slots and finished techs (`research.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), national focus, laws, advisors and national spirits (`politics.tsv`), construction lines (`construction.tsv`), trade deals and auto-import settings (`trade.tsv`), fuel prioritization, army motorization and exercises (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), air wings (`air.tsv`), task forces and admirals (`naval.tsv`, `admirals.tsv`), research slots and finished techs (`research.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -229,6 +229,33 @@ categories with `law = yes`) and `appointed_advisors` (slot and character id; th
 once after `CSetNationalFocusCommand`, `CDropCurrentNationalFocusCommand`, `CAddIdeaCommand` or `CReplaceIdeaCommand`
 (country +0x28) or `CAddAdvisorCommand` / `CRemoveAdvisorCommand` (character `73:ID` +0x28; the country is the
 character's). `--no-politics` turns it off.
+
+Economy (`hoi4ai/economyrec.py`), two files. `construction.tsv` gets every country's construction lines, buildings
+and railways, at the first read (`start`), then each line queued (`new`), changed (`changed`: the levels to build or
+repair, or its place in the queue; was the old values) and ended (`done` when its last level was about finished,
+else `removed`: cancelled or the state lost): date, change, country (the state's owner), line (the id; `rN` for a
+railway), building (`rail_way` for a railway), state, province (province buildings: bunkers, naval bases, ...; a
+railway's first and last province, `FIRST>LAST`), amount (levels left; 0 for a repair), priority (0 the top; railways
+share the queue), repair, produced and cost (of the current level), factories (civilian factories on it), flags
+(`conversion`, `allied`). A line finishing moves the lines below it up a place; only a change in their order counts.
+
+`trade.tsv` gets every trade deal between any two countries, `start` / `new` / `changed` (amount or factories) /
+`removed`: date, change, exporter, importer, resource, amount (per day), factories (the importer's civilian
+factories paid), deal id, start date. Deals the automatic trading makes are deals like any other. The auto-import
+settings come as rows with deal `setting`: exporter the country, resource the setting (`auto_import_enabled`,
+`max_factories_for_auto_import`, `auto_import_prioritize_fuel`, `auto_import_fuel_topping`), amount its value.
+
+Building lines are handle 59 (`CBuildingProductionLine`); railways (`CRailwayProductionLine`) and deals
+(`CResourceExchange`) share handle 4713 with generals, convoys and more. Both are read with one batched
+`bridge.write` of the ids seen before plus the next ones (new objects get higher ids), each new day and at once after
+a construction or trade command (`CAddConstructionCommand`, `CRemoveConstructionCommand`,
+`CChangeProductionLinePriorityCommand`, `CBuildRailwayCommand`, `CCreateTradeCommand`, `CSetAutoImport...`, ...):
+about a second. The first read probes every id (about 30 s). A building's location is a state id, or a province id
+for buildings with `province_max` in `common/buildings`; owners come from memory (`hoi4ai.live.Provinces`). A deal's
+text names only the importer; the exporter is found in memory (the deal's +0x80 is the exporter's
+`CCountryResources`, at `CCountry` +0x11f8). Settings are read from the save-format block: the country each day,
+other producing countries spread over 7 days, a country at once after its auto-import command (country id +0x28).
+`--no-economy` turns it off.
 
 Logistics (`hoi4ai/logisticsrec.py`): `logistics.tsv` gets each country's fuel prioritization and each army's
 motorization priority and exercises at its first read and then each change: date, change (`start`, `new`, `changed`, `removed`),
