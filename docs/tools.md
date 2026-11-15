@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), national focus, laws, advisors and national spirits (`politics.tsv`), construction lines (`construction.tsv`), trade deals and auto-import settings (`trade.tsv`), pacts, wars, wargoals and factions (`diplomacy.tsv`), fuel prioritization, army motorization and exercises (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), air wings (`air.tsv`), task forces and admirals (`naval.tsv`, `admirals.tsv`), research slots and finished techs (`research.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), national focus, laws, advisors and national spirits (`politics.tsv`), construction lines (`construction.tsv`), trade deals and auto-import settings (`trade.tsv`), pacts, wars, wargoals and factions (`diplomacy.tsv`), occupation laws and garrison templates (`occupation.tsv`), fuel prioritization, army motorization and exercises (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), air wings (`air.tsv`), task forces and admirals (`naval.tsv`, `admirals.tsv`), research slots and finished techs (`research.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -260,18 +260,33 @@ other producing countries spread over 7 days, a country at once after its auto-i
 Diplomacy (`hoi4ai/diplomacyrec.py`): `diplomacy.tsv` gets each country's relations at the first read (`start`), then
 each one added (`new`), changed (`changed`, was the old value) and ended (`removed`): date, change, country, kind,
 partner, key, value, was. Kinds: `pact` (every relation with a first and second country: guarantee, military_access,
-market_access_rights, puppet with its autonomy level, war_relation, improve_relation, lend_lease, ...; value
-`FIRST>SECOND START`), `deal` (dated relations: trade, trade_equipment, truce_until), `diplomat` (a day after a
-diplomatic action was last sent to the partner), `opinion` (opinion modifiers, added and removed only), `wargoal`
+puppet with its autonomy level, war_relation, improve_relation, lend_lease, ...; value
+`FIRST>SECOND START`), `deal` (dated relations: trade, trade_equipment, truce_until), `opinion` (opinion modifiers, added and removed only), `wargoal`
 (the type against the target; `justifying` while one is justified), `faction` (partner the leader, key the name; one
 row per member), `incoming` (actions waiting for the country's answer) and `other` (the rest of the diplomacy block,
-as one line: volunteer recall cooldowns, the faction join date, ...). Read from the save-format block
+as one line: volunteer recall cooldowns, the faction join date, ...). Market access is left out (the game asks for
+it by itself), and so is the date a diplomat was last sent (market access requests set it too). Read from the save-format block
 (`diplomacy={ active_relations={ ... } wargoals={ ... } }`, `incoming_diplomatic_action={ ... }`): the country each
 day, other producing countries spread over 7 days, the country at once after a diplomacy command
 (`CDiplomaticActionCommand`, `CCreateFactionCommand`, `CReleaseCountryCommand`, ...; the actions hold their countries
 behind pointers, so the other side is read on its day). Factions are not in a country's block: a `bridge.query` of
 every country in a faction (`is_in_faction`, `is_faction_leader`, `[THIS.GetFactionName]`) each day and after a
 diplomacy command. `--no-diplomacy` turns it off.
+
+Occupation (`hoi4ai/occupationrec.py`): `occupation.tsv` gets each country's occupation settings at the first read
+(`start`), then each one added, changed or removed: date, change, country, kind, target, key, value, was. Kinds:
+`global` (`default_law`, the primary garrison `template` as `NAME #id`, the garrison `priority`), `country` (an
+occupied country's own `occupation_law` and `template`), `state` (each occupied state's `law`, and a state's own
+garrison settings) and `release` (`released` rows from the release command: target the released country, value the
+panel's boxes, `puppet`, `play_as`, `retain_cores`, or `none`). Read from the save-format block
+(`occupation_status={ default_law= division_template_id= occupation={ TAG={ occupation_law_list={...}
+state_garrison_data={...} } } }`) for the country each day, other producing countries spread over 7 days, the
+country at once after an occupation command (`CSetDefaultCountryOccupationPolicyCommand`,
+`CSetOccupationPolicyCommand`, `CSetMainGarrisonTemplateCommand`, `CSetCountryGarrisonTemplateCommand`, ...).
+Resistance, compliance and garrison strength are left out. `CReleaseCountryCommand`: +0x28 the releasing country id,
++0x2c the released, then one byte per box (+0x30 play as, +0x31 puppet, +0x32 retain cores; puppet is sure, the other two
+likely). A released puppet also
+shows in `diplomacy.tsv`. `--no-occupation` turns it off.
 
 Logistics (`hoi4ai/logisticsrec.py`): `logistics.tsv` gets each country's fuel prioritization and each army's
 motorization priority and exercises at its first read and then each change: date, change (`start`, `new`, `changed`, `removed`),

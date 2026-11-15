@@ -9,8 +9,6 @@ pact      the other      the relation       FIRST>SECOND START (and the autonomy
                                             block with first= and second=)
 deal      the other      trade, truce_until the date (a dated relation without a block: trade, trade_equipment,
                                             truce_until after a country leaves or is kicked from a faction)
-diplomat  the other      last_send_diplomat a day after a diplomatic action was last sent to it (improve relations,
-          country                           a guarantee, a request, lend-lease, ...)
 opinion   the other      the modifier       its value (only added and removed count, not the value going down)
 wargoal   the target     the type           the wargoal's id; key justifying (no value) while one is being
                                             justified
@@ -42,7 +40,8 @@ COMMANDS = ("CDiplomaticActionCommand", "CIncomingDiplomaticActionActingCommand"
             "CSetFactionUpgradeCommand", "CFactionSetCommanderCommand", "CAmendIncomingLendLeaseActionCommand",
             "CRequestExpeditionariesCommand", "CReleaseCountryCommand", "CPromoteAutonomyCommand",
             "CRemoveAutonomyCommand", "CDonePeaceConferenceCommand", "CSetNavalRegionAccessCommand")
-SKIP = {"cached_sum", "attitude", "border_friction_claim", "rule_overrides"}
+SKIP = {"cached_sum", "attitude", "border_friction_claim", "rule_overrides",
+        "market_access_rights", "last_send_diplomat"}   # market access is automatic; it also sets last_send_diplomat
 SKIP_TOP = {"active_relations", "wargoals", "proposed_diplo_action", "cached_allies_and_gurantees",
             "exile_army_leaders"}
 QUIET = {"opinion"}     # kinds whose value changes don't count
@@ -78,8 +77,6 @@ def relations(body):
                 if pdx.get(v, "autonomy_state"):
                     value += " " + pdx.get(v, "autonomy_state")
                 out[("pact", partner, k)] = value
-            elif k == "last_send_diplomat":
-                out[("diplomat", partner, k)] = v
             elif not isinstance(v, list):
                 out[("deal", partner, k)] = v
             else:
@@ -101,9 +98,10 @@ def relations(body):
 def incoming(body):
     out = {}
     for k, _, v in pdx.parse(body):
-        if isinstance(v, list):
-            sender = pdx.get(v, "sender") or pdx.get(v, "actor") or pdx.get(v, "from") or "?"
-            out[("incoming", sender, k)] = flat(v)[:300]
+        if isinstance(v, list):     # N={ id={...} ACTION={ actor= recipient= ... } }
+            action = next(((a, x) for a, _, x in v if a != "id" and isinstance(x, list)), (k, v))
+            if action[0] not in SKIP:
+                out[("incoming", pdx.get(action[1], "actor", "?"), action[0])] = flat(action[1])[:300]
         else:
             out[("incoming", "", k)] = v
     return out
