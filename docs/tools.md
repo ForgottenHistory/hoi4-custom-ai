@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), fuel prioritization, army motorization and exercises (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), air wings (`air.tsv`), task forces and admirals (`naval.tsv`, `admirals.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), fuel prioritization, army motorization and exercises (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), air wings (`air.tsv`), task forces and admirals (`naval.tsv`, `admirals.tsv`), research slots and finished techs (`research.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -279,6 +279,16 @@ max experience +0x41), `CNavalMissionAddRegionCommand` (fleet `61:ID` +0x28, reg
 `CMergeNaviesCommand`, `CSetFleetLeaderCommand` (admiral +0x28, fleet +0x30), `CSetFleetHomeBaseCommand` (fleet +0x28,
 province +0x30), `CSetAsReserveFleetCommand`, `CLearnTraitCommand`, `CSetTaskForceAutoReinforcementCommand` (task
 forces +0x28), `CSetTaskForceCompositionRequirementsCommand` or `CDeleteUnitCommand` (`61:ID` +0x28). `--no-naval` turns it off.
+
+Research (`hoi4ai/researchrec.py`): `research.tsv` gets each country's research slots at its first read and then each
+change: date, change (`start`, `new`, `changed`, `removed`, `done`), country, slot (1 the first), tech (empty: idle),
+level, design_team (MIO handle 79 id and name, e.g. `23 GER_mauser_organization`), points (research points so far, not
+compared) and was (`field=old`). A `done` row is a tech finished: its level, the design company that helped and, in
+points, the game's own finish date (the row's date is when it was read). Read from the save-format block
+(`technology={ technologies={ NAME={ level research_points date design_team } } slots={ NAME | empty } }`). The
+country's each day, other producing countries' every 7 days, and the country's at once after its own
+`CSetResearchCommand` (country id +0x28, `CTechnologyTemplate*` +0x30 with the name at +0x10, slot +0x38 from 0; every
+country's show owner `-`) or a `CSetDesignTeamCommand` (design company `79:ID` +0x38). `--no-research` turns it off.
 
 ### `analyze_cmdrec.py`
 

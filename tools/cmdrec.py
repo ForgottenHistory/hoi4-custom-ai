@@ -38,6 +38,8 @@ Air wings (hoi4ai/airrec.py): the air wings of the country each day and of every
 Navies (hoi4ai/navalrec.py): the task forces and admirals of the country each day and of every other producing
 country each week (ships, mission, regions, engagement, repair, home base, admiral; admirals' skills and traits), as
 they change, to naval.tsv and admirals.tsv.
+Research (hoi4ai/researchrec.py): the tech and design company in each research slot of the country each day and of
+every other producing country each week, and the techs finished, to research.tsv.
 Analyse with analyze_cmdrec.py.
 """
 import argparse
@@ -46,7 +48,7 @@ import re
 import time
 
 import _bridge  # noqa: F401  (puts the hoi4-bridge client on the path)
-from hoi4ai import airrec, countryrec, deploymentrec, doctrinerec, equipmentrec, eventrec, generalrec, logisticsrec, marketrec, miorec, navalrec, planrec, productionrec, spiritrec, templaterec
+from hoi4ai import airrec, countryrec, deploymentrec, doctrinerec, equipmentrec, eventrec, generalrec, logisticsrec, marketrec, miorec, navalrec, planrec, productionrec, researchrec, spiritrec, templaterec
 from hoi4ai.gamefiles import game_dir
 from hoi4bridge import BridgeError, player_tag, query, send
 
@@ -93,6 +95,7 @@ def main():
     ap.add_argument("--no-generals", action="store_true", help="no generals log (generals.tsv)")
     ap.add_argument("--no-air", action="store_true", help="no air wing log (air.tsv)")
     ap.add_argument("--no-naval", action="store_true", help="no navy log (naval.tsv, admirals.tsv)")
+    ap.add_argument("--no-research", action="store_true", help="no research log (research.tsv)")
     a = ap.parse_args()
 
     try:
@@ -138,6 +141,8 @@ def main():
     naval = None if a.no_naval else navalrec.NavalLog(
         os.path.join(folder, "naval.tsv"), os.path.join(folder, "admirals.tsv"), events.names, [tag],
         lambda: mios.others if mios else ())
+    research = None if a.no_research else researchrec.ResearchLog(
+        os.path.join(folder, "research.tsv"), events.names, [tag], lambda: mios.others if mios else ())
     plans = None if a.no_plans else planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = None if a.no_country else countryrec.CountryLog(folder, tag)
     send(f"bridge.cmdrec mark player={player}")
@@ -233,6 +238,11 @@ def main():
                         naval.step(d, events.lines)
                     except (OSError, BridgeError) as e:
                         print("naval:", e)
+                if research:
+                    try:
+                        research.step(d, events.lines)
+                    except (OSError, BridgeError) as e:
+                        print("research:", e)
                 if not a.no_snap and day and day != last_day:
                     send(f"bridge.snap {day} 51 {SNAP_FIELDS}")
                     last_day = day
@@ -264,6 +274,8 @@ def main():
             air.step(last, events.lines)
         if naval and last:
             naval.step(last, events.lines)
+        if research and last:
+            research.step(last, events.lines)
 
 
 if __name__ == "__main__":

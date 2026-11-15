@@ -14,7 +14,7 @@ hoi4ai/miorec.py), market contracts and listings (market.tsv, hoi4ai/marketrec.p
 (doctrines.tsv, hoi4ai/doctrinerec.py), officer corps spirits (spirits.tsv, hoi4ai/spiritrec.py),
 fuel prioritization, army motorization and exercises (logistics.tsv, hoi4ai/logisticsrec.py), training and deployment
 (deployment.tsv, hoi4ai/deploymentrec.py), generals (generals.tsv, hoi4ai/generalrec.py), air wings (air.tsv, hoi4ai/airrec.py), and task forces and
-admirals (naval.tsv, admirals.tsv, hoi4ai/navalrec.py). It stops a step after the target capitulates, --war-days after the declaration, or with Ctrl+C. Our own controller records the same way by itself.
+admirals (naval.tsv, admirals.tsv, hoi4ai/navalrec.py), and research (research.tsv, hoi4ai/researchrec.py). It stops a step after the target capitulates, --war-days after the declaration, or with Ctrl+C. Our own controller records the same way by itself.
 
 Recordings go to recordings/battle_<label>_<TAG>_<time>/.
 """
@@ -25,7 +25,7 @@ import time
 
 import _bridge  # noqa: F401
 from hoi4bridge import BridgeError, BridgeUnavailable, send, trigger
-from hoi4ai import airrec, countryrec, deploymentrec, doctrinerec, equipmentrec, eventrec, generalrec, logisticsrec, marketrec, miorec, navalrec, planrec, productionrec, spiritrec, templaterec
+from hoi4ai import airrec, countryrec, deploymentrec, doctrinerec, equipmentrec, eventrec, generalrec, logisticsrec, marketrec, miorec, navalrec, planrec, productionrec, researchrec, spiritrec, templaterec
 from hoi4ai.battlerec import BattleRecorder
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.live import Provinces
@@ -73,6 +73,8 @@ def main():
     air = airrec.AirLog(os.path.join(folder, "air.tsv"), events and events.names, [tag], lambda: mios.others)
     naval = navalrec.NavalLog(os.path.join(folder, "naval.tsv"), os.path.join(folder, "admirals.tsv"),
                               events and events.names, [tag], lambda: mios.others)
+    research = researchrec.ResearchLog(os.path.join(folder, "research.tsv"), events and events.names, [tag],
+                                       lambda: mios.others)
     plans = planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = countryrec.CountryLog(folder, tag)
     provinces = Provinces()
@@ -165,6 +167,10 @@ def main():
                 naval.step(f"{now:%Y-%m-%d %H:00}", events.lines if events else ())
             except (OSError, BridgeError, BridgeUnavailable) as e:
                 print("naval:", e)
+            try:   # without the record: read each day
+                research.step(f"{now:%Y-%m-%d %H:00}", events.lines if events else ())
+            except (OSError, BridgeError, BridgeUnavailable) as e:
+                print("research:", e)
             taken = int(((provinces.owner == ids[target]) & (provinces.controller == ids[tag])).sum())
             print(f"{now:%Y-%m-%d %H:00} war={int(at_war)} divisions={len(divs)} taken={taken}")
             done = capitulated
@@ -191,6 +197,7 @@ def main():
             generals.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
             air.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
             naval.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
+            research.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
     print("recorded into", folder)
 
 
