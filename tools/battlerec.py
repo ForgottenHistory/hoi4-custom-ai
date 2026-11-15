@@ -14,6 +14,7 @@ hoi4ai/miorec.py), market contracts and listings (market.tsv, hoi4ai/marketrec.p
 (doctrines.tsv, hoi4ai/doctrinerec.py), officer corps spirits (spirits.tsv, hoi4ai/spiritrec.py),
 focus, laws, advisors and national spirits (politics.tsv, hoi4ai/politicsrec.py),
 construction lines, trade deals and auto-import settings (construction.tsv, trade.tsv, hoi4ai/economyrec.py),
+pacts, wars, wargoals and factions (diplomacy.tsv, hoi4ai/diplomacyrec.py),
 fuel prioritization, army motorization and exercises (logistics.tsv, hoi4ai/logisticsrec.py), training and deployment
 (deployment.tsv, hoi4ai/deploymentrec.py), generals (generals.tsv, hoi4ai/generalrec.py), air wings (air.tsv, hoi4ai/airrec.py), and task forces and
 admirals (naval.tsv, admirals.tsv, hoi4ai/navalrec.py), and research (research.tsv, hoi4ai/researchrec.py). It stops a step after the target capitulates, --war-days after the declaration, or with Ctrl+C. Our own controller records the same way by itself.
@@ -27,7 +28,7 @@ import time
 
 import _bridge  # noqa: F401
 from hoi4bridge import BridgeError, BridgeUnavailable, send, trigger
-from hoi4ai import airrec, countryrec, deploymentrec, doctrinerec, economyrec, equipmentrec, eventrec, generalrec, logisticsrec, marketrec, miorec, navalrec, planrec, politicsrec, productionrec, researchrec, shared, spiritrec, templaterec
+from hoi4ai import airrec, countryrec, deploymentrec, doctrinerec, diplomacyrec, economyrec, equipmentrec, eventrec, generalrec, logisticsrec, marketrec, miorec, navalrec, planrec, politicsrec, productionrec, researchrec, shared, spiritrec, templaterec
 from hoi4ai.battlerec import BattleRecorder
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.live import Provinces
@@ -70,6 +71,8 @@ def main():
                                        lambda: mios.others)
     economy = economyrec.EconomyLog(os.path.join(folder, "construction.tsv"), os.path.join(folder, "trade.tsv"),
                                     events and events.names, [tag], lambda: mios.others)
+    diplomacy = diplomacyrec.DiplomacyLog(os.path.join(folder, "diplomacy.tsv"), events and events.names, [tag],
+                                          lambda: mios.others)
     logistics = logisticsrec.LogisticsLog(os.path.join(folder, "logistics.tsv"), events and events.names, [tag],
                                           lambda: mios.others)
     deployment = deploymentrec.DeploymentLog(os.path.join(folder, "deployment.tsv"), events and events.names, [tag],
@@ -163,6 +166,10 @@ def main():
             except (OSError, BridgeError, BridgeUnavailable) as e:
                 print("economy:", e)
             try:   # without the record: read each day
+                diplomacy.step(f"{now:%Y-%m-%d %H:00}", events.lines if events else ())
+            except (OSError, BridgeError, BridgeUnavailable) as e:
+                print("diplomacy:", e)
+            try:   # without the record: read each day
                 logistics.step(f"{now:%Y-%m-%d %H:00}", events.lines if events else ())
             except (OSError, BridgeError, BridgeUnavailable) as e:
                 print("logistics:", e)
@@ -210,6 +217,7 @@ def main():
             spirits.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
             politics.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
             economy.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
+            diplomacy.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
             logistics.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
             deployment.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
             generals.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
