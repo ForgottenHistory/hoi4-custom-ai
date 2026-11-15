@@ -61,17 +61,19 @@ def load_examples(path):
 
 
 def wars(folder, tag):
+    """TAG's wars, declared by them (attacker) or on them."""
     out, open_ = [], {}
     for r in rows(os.path.join(folder, "diplomacy.tsv")):
-        if r.get("country") != tag or r.get("kind") != "pact" or r.get("key") != "war_relation":
+        if r.get("kind") != "pact" or r.get("key") != "war_relation" or tag not in (r.get("country"), r.get("partner")):
             continue
-        if r["change"] == "new":
+        foe = r["partner"] if r["country"] == tag else r["country"]
+        if r["change"] in ("new", "start"):
             m = re.search(r"(\d+)\.(\d+)\.(\d+)\.(\d+)", r.get("value", ""))
             start = datetime.datetime(*map(int, m.groups()[:3]), int(m.group(4)) % 24) if m else when(r["date"])
-            open_[r["partner"]] = {"enemy": r["partner"], "start": start, "end": None,
-                                   "attacker": r.get("value", "").startswith(tag + ">")}
-        elif r["change"] == "removed" and r["partner"] in open_:
-            w = open_.pop(r["partner"])
+            open_[(r["country"], foe)] = {"enemy": foe, "start": start, "end": None,
+                          "attacker": r.get("value", "").startswith(tag + ">")}
+        elif r["change"] == "removed" and (r["country"], foe) in open_:  # by side: both can declare
+            w = open_.pop((r["country"], foe))
             w["end"] = when(r["date"])
             out.append(w)
     out += open_.values()

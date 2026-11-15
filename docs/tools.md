@@ -474,6 +474,34 @@ finished, laws and advisors, decisions taken, research picks, event choices, tem
 queued (dated as in `examples.jsonl`), and per war the army commands by kind in the 14 days before and after it
 started with the other choices made in those 14 days.
 
+### `campaignmap.py`
+
+    python tools/campaignmap.py RECORDING_DIR [--save SAVE.hoi4 ...] [--tag NGR] [--pad 60] [--gif] [--out FILE]
+                                [--no-open]
+
+Maps of a recorded campaign, cropped on the player's land and wherever their divisions went:
+`campaignmap_<TAG>.png` in the recording folder. The recording logs no state ownership, so the land at the start
+comes from `history/states` (through the recording's `dlc_load.json` mods) and later land from each `--save` (plain
+text saves: every state's owner, and each province's controller where the save names one). There is one panel per
+date. It colours the player's starting land, land they gained, land they occupy without owning it, land they lost,
+and every other country with its tag, and shows the player's divisions on that day from `unit_snapshots.tsv`. A last
+panel shows the army's division-days per province over the whole recording, with the player's wars from
+`diplomacy.tsv` (declared by them or on them, from the game's own date of each war). `--gif` also writes the army
+every 7 days as an animation, with enemy divisions in red. Between saves the land is replayed day by day from
+`unit_snapshots.tsv`:
+
+- When an enemy capitulates (`capitulated_date` in `diplomacy.tsv`), all its land comes under the player's control.
+- While the player is at war, each province their divisions pass through becomes theirs to control. The path is
+  the shortest land path from yesterday's province to today's.
+- Enemy divisions take back the provinces they pass through in the same way.
+- When a war ends, the occupied land that is the player's in the next save becomes theirs, with the rest of those
+  states. The rest of the occupied land goes back to its owner.
+- Outside a war, a state that is the player's in the next save becomes theirs when their divisions first enter it.
+- A state they lose goes at the last fall of their `country.tsv` state count before the next save.
+
+The tool prints how far the replay is from that count. Encirclements and land a peace deal hands over without
+troops are guesses, so save more often for better land.
+
 ## Checking the data
 
 ### `audit.py`
