@@ -212,7 +212,7 @@ def armies_of(tag, gap=1000, proc=None):
         scanned = {}
     if not scanned:
         return _probe_armies(tag, gap)
-    owner = {oid: {_i32(proc, a + 0x3c) for a in addrs} for oid, addrs in scanned.items()}
+    owner = {oid: {_read_i32(proc, a + 0x3c) for a in addrs} for oid, addrs in scanned.items()}
     if tag not in _country_ids:
         ids = sorted({c for cs in owner.values() for c in cs if c is not None and 0 <= c < 100000})
         for c, r in zip(ids, send(*[f"bridge.tag {c}" for c in ids]) if ids else []):
@@ -224,7 +224,7 @@ def armies_of(tag, gap=1000, proc=None):
             if r.startswith("OK COrdersGroup") and re.search(rf"\+0x3c={tag}\b", r)]
 
 
-def _i32(proc, addr):
+def _read_i32(proc, addr):
     try:
         return proc.i32(addr)
     except OSError:

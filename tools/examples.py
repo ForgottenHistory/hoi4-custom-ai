@@ -264,13 +264,22 @@ def commands(path, tag, states, owners):
     return [(d, c, w) for (d, c), w in sorted(out.items(), key=lambda x: x[0])]
 
 
-def provinces_to_states(game):
-    """province id -> state name, from the game's history/states (empty without the game files)."""
+def provinces_to_states(game, load=None):
+    """province id -> state name, from history/states/<id>-<name>.txt through the mods of LOAD (the recording's
+    copy of dlc_load.json), else the ones active now (hoi4ai.gamefiles); empty without the game files."""
+    from hoi4ai.gamefiles import GameFiles
+    out = {}
     try:
-        from analyze_cmdrec import load_geography
-        return load_geography(game)[0]
-    except (ImportError, OSError):
-        return {}
+        files = GameFiles(game or None, load=load if load and os.path.exists(load) else None)
+        for fn, path in files.listdir("history/states", ".txt").items():
+            name = os.path.splitext(os.path.basename(fn))[0].split("-", 1)[-1].strip()
+            m = re.search(r"provinces\s*=\s*\{([^}]*)\}",
+                          open(path, encoding="utf-8-sig", errors="replace").read())
+            for pid in m.group(1).split() if m else ():
+                out[int(pid)] = name
+    except OSError:
+        pass
+    return out
 
 
 def main():
@@ -285,7 +294,8 @@ def main():
     if not tag:
         sys.exit("no player tag: pass --tag")
     owners = division_owners(os.path.join(a.dir, "unit_snapshots.tsv"))
-    cmds = commands(rec, tag, provinces_to_states(a.game), owners) if os.path.exists(rec) else []
+    states = provinces_to_states(a.game, os.path.join(a.dir, "dlc_load.json"))
+    cmds = commands(rec, tag, states, owners) if os.path.exists(rec) else []
 
     events = []     # (datetime, order, kind, source, row)
     for src, owners in LOGS.items():

@@ -119,6 +119,8 @@ every division (`bridge.snap`) into `unit_snapshots.tsv`: owner, province, order
 template. Two blocks a day: handle 51 (the divisions from the game's setup) and 4713 (divisions trained later).
 By default the AI's own bookkeeping commands are not recorded (`SKIP` in cmdrec.py: section blocks, force
 concentration, wanted division counts, pings; about half of a late game's record); `--skip` with no class records
+It also copies the launcher's `dlc_load.json` (the active mods) into the folder, so the game files can be read
+through the same mods later.
 everything.
 
 The game is never paused. The main loop only polls the date and writes the marks; the state logs below run on a
@@ -440,7 +442,9 @@ classes left out), each decoded: moves (division, path, target province and stat
 halts and battle-plan commands. The record has no owner for moves and rail moves of divisions trained during the
 game (handle 4713) nor for halts; those are the player's when a division they name is the player's in
 `unit_snapshots.tsv` (`"owner_from": "divisions"`). Divisions are keyed as in `analyze_snaps.py`: the id for
-handle 51, `4713:ID` for later ones. `CMassMoveCommand` names no divisions and is left out. The state: the `country.tsv` row of the day before, the current focus, research slots, laws,
+handle 51, `4713:ID` for later ones. `CMassMoveCommand` names no divisions and is left out. Province ids get
+their state names from the game files through the mods in the recording's `dlc_load.json` (cmdrec saves a copy
+of the launcher's at the start), else the mods active now. The state: the `country.tsv` row of the day before, the current focus, research slots, laws,
 war goals, wars and puppets, replayed from the logs. `auto: true` marks rows the game makes by itself (a focus or
 research finishing, construction done or repaired, deployments arriving, decisions becoming available, incoming
 offers, other countries buying, deals made while auto import is on); they are kept as context. A log row is dated

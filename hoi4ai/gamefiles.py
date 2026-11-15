@@ -2,7 +2,8 @@
 
 The active mods are the ones the launcher wrote to dlc_load.json for the last launch. A later mod's file wins
 over an earlier one's and over the base game's; a mod's replace_path hides the base game's and earlier mods'
-files in that folder (that folder only, not its subfolders).
+files in that folder (that folder only, not its subfolders). GameFiles(load=PATH) takes the mods from another
+copy of dlc_load.json instead, such as the one cmdrec saves into a recording (save_load(folder)).
 """
 import ctypes
 import json
@@ -62,6 +63,17 @@ def _norm(rel):
     return rel.replace("\\", "/").strip("/").lower()
 
 
+def save_load(folder):
+    """Copy the launcher's dlc_load.json (the active mods) into FOLDER; returns the copy's path, or None."""
+    src = os.path.join(user_dir(), "dlc_load.json")
+    if not os.path.exists(src):
+        return None
+    dst = os.path.join(folder, "dlc_load.json")
+    with open(src, "rb") as f, open(dst, "wb") as g:
+        g.write(f.read())
+    return dst
+
+
 class Mod:
     def __init__(self, descriptor, root, name, replace):
         self.descriptor, self.root, self.name = descriptor, root, name
@@ -85,15 +97,15 @@ def _parse_descriptor(path, udir):
 
 
 class GameFiles:
-    def __init__(self, game=None, user=None, mods=None):
+    def __init__(self, game=None, user=None, mods=None, load=None):
         self.game = game or game_dir()
         self.user = user or user_dir()
-        self.mods = self._active_mods() if mods is None else mods
+        self.mods = self._active_mods(load) if mods is None else mods
         self._listing = {}
 
-    def _active_mods(self):
+    def _active_mods(self, path=None):
         try:
-            load = json.load(open(os.path.join(self.user, "dlc_load.json"), encoding="utf-8"))
+            load = json.load(open(path or os.path.join(self.user, "dlc_load.json"), encoding="utf-8"))
         except (OSError, ValueError):
             return []
         mods = []

@@ -67,6 +67,7 @@ import threading
 import time
 
 import _bridge  # noqa: F401  (puts the hoi4-bridge client on the path)
+from hoi4ai import gamefiles
 from hoi4ai import airrec, countryrec, decisionrec, deploymentrec, doctrinerec, diplomacyrec, economyrec, equipmentrec, eventrec, generalrec, intelligencerec, logisticsrec, marketrec, miorec, navalrec, occupationrec, planrec, politicsrec, productionrec, researchrec, shared, spiritrec, templaterec
 from hoi4ai.gamefiles import game_dir
 from hoi4bridge import BridgeError, BridgeUnavailable, player_tag, query, send
@@ -141,6 +142,7 @@ def main():
     tag = a.tag or (player if player != "none" else "GER")
     folder = os.path.abspath(a.dir) if a.dir else game_dir()
     os.makedirs(folder, exist_ok=True)
+    gamefiles.save_load(folder)     # the active mods, for reading the game files later (examples.py)
     unskip = [c for c in SKIP if c not in a.skip]      # the bridge keeps its skip list until the game closes
     if unskip:
         send("bridge.cmdrec unskip " + " ".join(unskip))
