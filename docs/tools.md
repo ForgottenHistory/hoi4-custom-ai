@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), fuel prioritization, army motorization and exercises (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), air wings (`air.tsv`), task forces and admirals (`naval.tsv`, `admirals.tsv`), research slots and finished techs (`research.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), national focus, laws, advisors and national spirits (`politics.tsv`), fuel prioritization, army motorization and exercises (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), air wings (`air.tsv`), task forces and admirals (`naval.tsv`, `admirals.tsv`), research slots and finished techs (`research.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -215,6 +215,20 @@ save-format block (the slots and their ideas from `common/idea_tags` and `common
 other producing countries' every 7 days, and a country's at once after an idea command for it. In the record, filling
 a slot is `CAddIdeaCommand` (country +0x28, `CIdea*` +0x30, its name at +0x18) and replacing one is
 `CReplaceIdeaCommand` (country +0x28, old +0x30, new +0x38). `--no-spirits` turns it off.
+
+Politics (`hoi4ai/politicsrec.py`): `politics.tsv` gets each country's national focus, laws, advisors and national
+spirits at its first read (`start`) and then each change (`new`, `changed`, `removed`): date, change, country, kind,
+slot, value, was. Kinds: `focus` (slot `current`: the focus being researched, removed when it ends; `paused`: `yes`
+while paused; `completed`: each completed focus), `law` (slot the law category: `economy`, `trade_laws`,
+`mobilization_laws`; `changed` with the old law in was), `advisor` (slot `political_advisor`, `theorist`,
+`high_command`, `army_chief`, ...; value the character's token) and `idea` (other ideas the player can see, by
+category: national spirits under `country`, manufacturers; hidden ideas and officer corps spirits are left out).
+All of it comes from the save-format block: `focus={...}`, `ideas={...}` (laws are the ideas of the `common/ideas`
+categories with `law = yes`) and `appointed_advisors` (slot and character id; the token read once with
+`bridge.write 73 ID`). The country's each day, other producing countries' spread over 7 days, and a country's at
+once after `CSetNationalFocusCommand`, `CDropCurrentNationalFocusCommand`, `CAddIdeaCommand` or `CReplaceIdeaCommand`
+(country +0x28) or `CAddAdvisorCommand` / `CRemoveAdvisorCommand` (character `73:ID` +0x28; the country is the
+character's). `--no-politics` turns it off.
 
 Logistics (`hoi4ai/logisticsrec.py`): `logistics.tsv` gets each country's fuel prioritization and each army's
 motorization priority and exercises at its first read and then each change: date, change (`start`, `new`, `changed`, `removed`),
