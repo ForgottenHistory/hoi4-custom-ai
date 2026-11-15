@@ -52,6 +52,7 @@ The player's commands (in command_record.tsv; the owner column is empty, the AI 
 import os
 import re
 
+from hoi4ai import shared
 from hoi4bridge import send
 
 FULL_DAYS = 7
@@ -211,7 +212,7 @@ class NavalLog:
 
     def find(self):
         p, found = self.proc, {}
-        for a in p.find_objects(CLASS):
+        for a in shared.objects(CLASS):
             if p.i32(a + 8) == LEADER and p.class_of(a) == CLASS and p.i32(a + 0x120) >= 0:
                 found.setdefault(p.i32(a + 0xc), []).append(a)
         self.admirals = {}
@@ -237,7 +238,7 @@ class NavalLog:
         return out
 
     def read(self, tag):
-        r = send(f"bridge.country {tag}")
+        r = shared.country(tag)
         tf = task_forces("\n".join(r)) if r and r[0].startswith("OK") else {}
         fleets = {v["admiral"]: v["fleet"] for v in tf.values() if v["admiral"]}
         adm = self._admirals(tag, fleets)
@@ -259,8 +260,7 @@ class NavalLog:
         todo = list(self.tags) if cmds else []
         if new_day:
             todo += self.tags
-            if not self.started or self.days % FULL_DAYS == 0:
-                todo += list(self.others() or ())
+            todo += list(self.others() or ()) if not self.started else shared.part(self.others(), self.days, FULL_DAYS)
         self.day = day
         rows, arows = [], []
         for tag in dict.fromkeys(todo):

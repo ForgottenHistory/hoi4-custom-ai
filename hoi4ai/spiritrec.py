@@ -21,6 +21,7 @@ import os
 import re
 
 from hoi4ai import pdx
+from hoi4ai import shared
 from hoi4bridge import send
 
 FULL_DAYS = 7
@@ -80,7 +81,7 @@ class SpiritLog:
             self.f.write(HEADER + "\n")
 
     def read(self, tag):
-        r = send(f"bridge.country {tag}")
+        r = shared.country(tag)
         m = _IDEAS.search("\n".join(r)) if r and r[0].startswith("OK") else None
         out = {}
         for idea in sorted(m.group(1).split() if m else ()):
@@ -96,8 +97,7 @@ class SpiritLog:
         if day != self.day:
             self.days += 1
             todo += self.tags
-            if not self.started or self.days % FULL_DAYS == 0:
-                todo += list(self.others() or ())
+            todo += list(self.others() or ()) if not self.started else shared.part(self.others(), self.days, FULL_DAYS)
         self.day = day
         rows = []
         for tag in dict.fromkeys(todo):

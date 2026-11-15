@@ -111,12 +111,24 @@ What a recording holds, and what it doesn't:
 
 ### `cmdrec.py`
 
-    python tools/cmdrec.py [--dir FOLDER] [--tag TAG]
+    python tools/cmdrec.py [--dir FOLDER] [--tag TAG] [--profile]
 
 Records every command the game executes (player and AI) while you play: turns on `bridge.cmdrec`, keeps stamping
 the in-game date into the record until Ctrl+C, which turns recording off. Each new in-game day it also snapshots
 every division (`bridge.snap`) into `unit_snapshots.tsv`: owner, province, order, organisation, strength,
 template.
+
+The game is never paused. The main loop only polls the date and writes the marks; the state logs below run on a
+worker thread, one step at a time, each step covering every record line since the last one, so at speed 5 a step
+can span a day or more. To keep steps short, a step reads each country's save-format block once
+(`hoi4ai/shared.py`), the other producing countries are spread over the week (a seventh of them each day instead of
+all of them every 7 days), and the memory scans for generals, task forces and doctrines run on one background
+thread (`shared.objects`, rescanned every 30 s). `--profile` prints each step's time per log.
+
+Dates: the game runs one `CHourlyTickCommand` per in-game hour and the record holds each one, so readers date a
+command by counting the ticks from the marks (`hoi4ai/clock.py`). A mark's date can be some hours late when the
+recorder is busy (mostly 1, up to 32 at speed 5), never early, so the latest anchor wins. `events.tsv` and
+`analyze_cmdrec.py` date this way.
 
 Battle plans: the record also holds the lists behind battle-plan commands (divisions, path points,
 fortification provinces), and each in-game hour the country's lines are read from memory into `plans.tsv` when they
@@ -145,8 +157,9 @@ owner, name, obsolete (1 once decommissioned with the designer's button: the tem
 new divisions), battalions, support companies. Battalions are the designer's grid, columns separated by `|`, each top to
 bottom (`infantry,infantry,infantry|infantry,infantry,infantry|...`). The templates are read again whenever the record
 holds a template command (create, edit in the designer, remove, set obsolete; those lines in `command_record.tsv` say
-who acted), when a new template id turns up (checked each in-game day) and every 7 days, since focuses and events can
-change templates without a command. A full read takes about a second. `--no-templates` turns it off.
+who acted; the AI's too, most steps at speed 5) or a new template id turns up (checked each in-game day); these read
+the templates found before plus the ids past the highest. Every 7 days all templates are found again by id (about a
+second), since focuses and events can change templates without a command. `--no-templates` turns it off.
 
 Equipment designs (`hoi4ai/equipmentrec.py`): `equipment_designs.tsv` gets every country's designs at the start
 (`start`, about 15 s), then each `new` design with the design it is based on, each design made `obsolete` (or

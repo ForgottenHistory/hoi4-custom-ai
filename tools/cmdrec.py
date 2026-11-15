@@ -5,8 +5,10 @@
 --dir puts command_record.tsv and unit_snapshots.tsv in FOLDER (default: the HOI4 folder). In observer mode
 (console `observe`) there is no player country; --tag names the country used to read the date (default GER).
 
-Turns on bridge.cmdrec, then keeps stamping the in-game date into the record ("#mark" lines) until
-Ctrl+C, which turns recording off. Each new in-game day it also snapshots every division (bridge.snap) into
+Turns on bridge.cmdrec, then keeps stamping the in-game date into the record ("#mark" lines) every --interval
+seconds until Ctrl+C, which turns recording off. The logs below read on a thread at each new date the main loop
+sees (a step takes ~1-2 s, longer than a day at speed 5, so the logs skip dates; rows are dated when read, and
+the marks stay on time; --profile prints what each step took). Each new in-game day it also snapshots every division (bridge.snap) into
 unit_snapshots.tsv: owner, province, order, organisation candidates, strength, template.
 Battle plans: the record also holds the lists behind the battle-plan commands (hoi4ai/planrec.py rules), and each
 in-game hour the player's (or --tag's) lines are read from memory and written to plans.tsv when they changed.
@@ -45,12 +47,13 @@ Analyse with analyze_cmdrec.py.
 import argparse
 import os
 import re
+import threading
 import time
 
 import _bridge  # noqa: F401  (puts the hoi4-bridge client on the path)
-from hoi4ai import airrec, countryrec, deploymentrec, doctrinerec, equipmentrec, eventrec, generalrec, logisticsrec, marketrec, miorec, navalrec, planrec, productionrec, researchrec, spiritrec, templaterec
+from hoi4ai import airrec, countryrec, deploymentrec, doctrinerec, equipmentrec, eventrec, generalrec, logisticsrec, marketrec, miorec, navalrec, planrec, productionrec, researchrec, shared, spiritrec, templaterec
 from hoi4ai.gamefiles import game_dir
-from hoi4bridge import BridgeError, player_tag, query, send
+from hoi4bridge import BridgeError, BridgeUnavailable, player_tag, query, send
 
 
 def game_date(tag: str) -> str:
@@ -95,6 +98,7 @@ def main():
     ap.add_argument("--no-generals", action="store_true", help="no generals log (generals.tsv)")
     ap.add_argument("--no-air", action="store_true", help="no air wing log (air.tsv)")
     ap.add_argument("--no-naval", action="store_true", help="no navy log (naval.tsv, admirals.tsv)")
+    ap.add_argument("--profile", action="store_true", help="print how long each log's step takes")
     ap.add_argument("--no-research", action="store_true", help="no research log (research.tsv)")
     a = ap.parse_args()
 
@@ -145,104 +149,77 @@ def main():
         os.path.join(folder, "research.tsv"), events.names, [tag], lambda: mios.others if mios else ())
     plans = None if a.no_plans else planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = None if a.no_country else countryrec.CountryLog(folder, tag)
+    loggers = [(n, v) for n, v in (("templates", templates), ("designs", designs), ("production", production),
+                                   ("mios", mios), ("market", market), ("doctrines", doctrines),
+                                   ("spirits", spirits), ("logistics", logistics), ("deployment", deployment),
+                                   ("generals", generals), ("air", air), ("naval", naval), ("research", research))
+               if v]
     send(f"bridge.cmdrec mark player={player}")
     print(f"player: {player}, date from {tag}")
     if not a.no_snap:
         print(send("bridge.snap reset " + os.path.join(folder, "unit_snapshots.tsv"))[0],
               "(division snapshots)")
+    latest = {"date": None}         # the newest date, set by the main loop every INTERVAL
+    wake, stop = threading.Event(), threading.Event()
+
+    def step(d):
+        day = day_label(d)
+        hour = re.match(r"(\d+):", d)
+        if plans and day and hour:
+            try:
+                plans.step(f"{day} {int(hour.group(1)):02d}:00")
+            except (OSError, BridgeError, BridgeUnavailable) as e:
+                print("plans:", e)
+        if country and day:
+            try:
+                country.step(day)
+            except (OSError, BridgeError, BridgeUnavailable, RuntimeError) as e:
+                print("country:", e)
+        try:
+            events.step()   # the marks flushed the record
+        except (OSError, BridgeError, BridgeUnavailable) as e:
+            print("events:", e)
+        shared.new_step(day)
+        timing = []
+        for name, log in loggers:
+            d = latest["date"] or d     # the game moves on while the logs read: date the rows when read
+            t0 = time.perf_counter()
+            try:
+                log.step(d) if name == "mios" else log.step(d, events.lines)
+            except Exception as e:      # noqa: BLE001  one log failing mustn't stop the others
+                print(f"\n{name}: {type(e).__name__}: {e}")
+            timing.append((name, time.perf_counter() - t0))
+        if a.profile and sum(t for _, t in timing) > 0.1:
+            print(f"\n  {sum(t for _, t in timing):.2f}s " + " ".join(f"{n}={t:.2f}" for n, t in timing if t >= 0.05))
+
+    def work():
+        done = None
+        while not stop.is_set():
+            wake.wait(1)
+            wake.clear()
+            d = latest["date"]
+            if d and d != done and not stop.is_set():
+                done = d
+                step(d)
+
+    # The logs read on a thread, so the main loop keeps stamping dates into the record (each command is dated by the
+    # mark before it) while a step takes longer than the game spends on a day at high speed.
+    worker = threading.Thread(target=work, name="logs", daemon=True)
+    worker.start()
     last, last_day = None, None
     try:
         while True:
             try:
                 d = game_date(tag)
-            except BridgeError as e:
+            except (BridgeError, BridgeUnavailable) as e:
                 print("date:", e)
                 d = None
             if d and d != last:
                 n = send(f"bridge.cmdrec mark date={d}")[0]
                 print(f"\r{d}  commands: {n.split()[-1]}      ", end="", flush=True)
-                last = d
+                last = latest["date"] = d
+                wake.set()
                 day = day_label(d)
-                hour = re.match(r"(\d+):", d)
-                if plans and day and hour:
-                    try:
-                        plans.step(f"{day} {int(hour.group(1)):02d}:00")
-                    except (OSError, BridgeError) as e:
-                        print("plans:", e)
-                if country and day:
-                    try:
-                        country.step(day)
-                    except (OSError, BridgeError, RuntimeError) as e:
-                        print("country:", e)
-                try:
-                    events.step()   # the mark flushed the record
-                except (OSError, BridgeError) as e:
-                    print("events:", e)
-                if templates:
-                    try:
-                        templates.step(d, events.lines)
-                    except (OSError, BridgeError) as e:
-                        print("templates:", e)
-                if designs:
-                    try:
-                        designs.step(d, events.lines)
-                    except (OSError, BridgeError) as e:
-                        print("designs:", e)
-                if production:
-                    try:
-                        production.step(d, events.lines)
-                    except (OSError, BridgeError) as e:
-                        print("production:", e)
-                if mios:
-                    try:
-                        mios.step(d)
-                    except (OSError, BridgeError) as e:
-                        print("mios:", e)
-                if market:
-                    try:
-                        market.step(d, events.lines)
-                    except (OSError, BridgeError) as e:
-                        print("market:", e)
-                if doctrines:
-                    try:
-                        doctrines.step(d, events.lines)
-                    except (OSError, BridgeError) as e:
-                        print("doctrines:", e)
-                if spirits:
-                    try:
-                        spirits.step(d, events.lines)
-                    except (OSError, BridgeError) as e:
-                        print("spirits:", e)
-                if logistics:
-                    try:
-                        logistics.step(d, events.lines)
-                    except (OSError, BridgeError) as e:
-                        print("logistics:", e)
-                if deployment:
-                    try:
-                        deployment.step(d, events.lines)
-                    except (OSError, BridgeError) as e:
-                        print("deployment:", e)
-                if generals:
-                    try:
-                        generals.step(d, events.lines)
-                    except (OSError, BridgeError) as e:
-                        print("generals:", e)
-                if air:
-                    try:
-                        air.step(d, events.lines)
-                    except (OSError, BridgeError) as e:
-                        print("air:", e)
-                if naval:
-                    try:
-                        naval.step(d, events.lines)
-                    except (OSError, BridgeError) as e:
-                        print("naval:", e)
-                if research:
-                    try:
-                        research.step(d, events.lines)
-                    except (OSError, BridgeError) as e:
-                        print("research:", e)
                 if not a.no_snap and day and day != last_day:
                     send(f"bridge.snap {day} 51 {SNAP_FIELDS}")
                     last_day = day
@@ -250,32 +227,15 @@ def main():
     except KeyboardInterrupt:
         print()
     finally:
+        stop.set()
+        wake.set()
+        worker.join()
         print(send("bridge.cmdrec off")[0])
         events.step()
-        if templates and last:
-            templates.step(last, events.lines)
-        if designs and last:
-            designs.step(last, events.lines)
-        if production and last:
-            production.step(last, events.lines)
-        if market and last:
-            market.step(last, events.lines)
-        if doctrines and last:
-            doctrines.step(last, events.lines)
-        if spirits and last:
-            spirits.step(last, events.lines)
-        if logistics and last:
-            logistics.step(last, events.lines)
-        if deployment and last:
-            deployment.step(last, events.lines)
-        if generals and last:
-            generals.step(last, events.lines)
-        if air and last:
-            air.step(last, events.lines)
-        if naval and last:
-            naval.step(last, events.lines)
-        if research and last:
-            research.step(last, events.lines)
+        shared.new_step()
+        for name, log in loggers if last else ():
+            if name != "mios":
+                log.step(last, events.lines)
 
 
 if __name__ == "__main__":

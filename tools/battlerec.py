@@ -25,7 +25,7 @@ import time
 
 import _bridge  # noqa: F401
 from hoi4bridge import BridgeError, BridgeUnavailable, send, trigger
-from hoi4ai import airrec, countryrec, deploymentrec, doctrinerec, equipmentrec, eventrec, generalrec, logisticsrec, marketrec, miorec, navalrec, planrec, productionrec, researchrec, spiritrec, templaterec
+from hoi4ai import airrec, countryrec, deploymentrec, doctrinerec, equipmentrec, eventrec, generalrec, logisticsrec, marketrec, miorec, navalrec, planrec, productionrec, researchrec, shared, spiritrec, templaterec
 from hoi4ai.battlerec import BattleRecorder
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.live import Provinces
@@ -119,6 +119,7 @@ def main():
                     events.step()
                 except (OSError, BridgeError, BridgeUnavailable) as e:
                     print("events:", e)
+            shared.new_step(f"{now:%Y-%m-%d}")
             try:   # without the record: new template ids each day and a full read every 7 days
                 templates.step(f"{now:%Y-%m-%d %H:00}", events.lines if events else ())
             except (OSError, BridgeError, BridgeUnavailable) as e:
@@ -186,6 +187,7 @@ def main():
             print(send("bridge.cmdrec off")[0])
             events.step()
         if last:
+            shared.new_step()
             templates.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
             designs.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())
             production.step(f"{last:%Y-%m-%d %H:00}", events.lines if events else ())

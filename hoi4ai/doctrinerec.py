@@ -21,7 +21,7 @@ at +0xe0. A track's index is its place in the grand doctrine's `tracks` list (co
 """
 import os
 
-from hoi4ai import pdx
+from hoi4ai import pdx, shared
 
 RESCAN_DAYS = 7
 HEADER = "date\tchange\tcountry\tfolder\ttrack\tdoctrine\twas\tmastery"
@@ -80,7 +80,7 @@ class DoctrineLog:
     def find(self):
         """Every live CCountryDoctrineStatus by country id (a copy whose first folder doesn't point back is stale)."""
         p, out = self.proc, {}
-        for a in p.find_objects(STATUS):
+        for a in shared.objects(STATUS):
             cid, fs, n = p.i32(a + 8), p.u64(a + 0x10), p.i32(a + 0x18)
             if 0 <= cid < 10000 and 0 < n <= 16 and p.class_of(fs) == FOLDER and p.u64(fs + 0x30) == a:
                 out[cid] = a

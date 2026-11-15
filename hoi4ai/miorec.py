@@ -16,6 +16,7 @@ A MIO's id is its handle { 79, id } (the manufacturer of production lines, see p
 import os
 import re
 
+from hoi4ai import shared
 from hoi4bridge import send
 
 FULL_DAYS = 7
@@ -62,7 +63,7 @@ class MioLog:
             self.f.write(HEADER + "\n")
 
     def _read(self, tag):
-        r = send(f"bridge.country {tag}")
+        r = shared.country(tag)
         return "\n".join(r) if r and r[0].startswith("OK") else ""
 
     def _diff(self, date, tag, now):
@@ -100,7 +101,7 @@ class MioLog:
                         self.others.append(tag)
         else:
             self.days += 1
-            todo = self.tags + (self.others if self.days % FULL_DAYS == 0 else [])
+            todo = self.tags + shared.part(self.others, self.days, FULL_DAYS)
             for tag in todo:
                 n += self._diff(date, tag, parse(self._read(tag)))
         self.f.flush()

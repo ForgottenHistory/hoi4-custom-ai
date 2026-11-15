@@ -1,7 +1,9 @@
 """Military production lines of every country, recorded whenever they change.
 
-ProductionLog(path).step(date, lines) reads every line (handle 56; about 160 in a 1936 game, under a second) at the
-first call, each new in-game day and whenever the record LINES hold a production command, and writes what differs:
+ProductionLog(path).step(date, lines) reads every line (handle 56; about 160 in a 1936 game) at the first call, each
+new in-game day and whenever the record LINES hold a production command, and writes what differs (finding the lines
+by id takes ~0.8 s, so it's done at the first call and every FULL_DAYS days; else the lines found before are read,
+checking each still holds its id, and the ids past the highest probed):
   date  change (start / new / changed / removed)  line  owner  design_id  design  factories  priority  manufacturer
 owner is the design's owner (a line making a licensed design shows the licensor); priority 0 is the top of the
 list; manufacturer is the military industrial organisation's id (handle 79), manufacturer_name its token
@@ -24,6 +26,7 @@ Naval lines (dockyards) aren't covered yet.
 import os
 import re
 
+from hoi4ai import shared
 from hoi4bridge import send
 
 CLASSES = ("CAddProductionLineCommand", "CAddProductionLineFactoriesCommand", "CSetProductionLineCommand",
@@ -32,11 +35,15 @@ HEADER = "date\tchange\tline\towner\tdesign_id\tdesign\tfactories\tpriority\tman
 _MIO = re.compile(r"^\s*(\w+)=\{\s*$\s*id=\{ id=(\d+) type=79 \}", re.M)
 
 
-def _addresses(max_gap=100):
-    """{line id: address} for every military production line, scanning ids from 1 until MAX_GAP in a row miss."""
-    out, i = {}, 1
-    while i - max(out, default=0) <= max_gap:
-        ids = range(i, i + 100)
+FULL_DAYS = 7
+
+
+def _addresses(max_gap=100, start=1):
+    """{line id: address} for every military production line, scanning ids from START until MAX_GAP in a row
+    miss."""
+    out, i = {}, start
+    while i - max(out, default=start - 1) <= max_gap:
+        ids = range(i, i + min(max_gap, 100))
         for k, r in zip(ids, send(*[f"bridge.object 56 {j}" for j in ids])):
             m = re.search(r"@0x([0-9a-fA-F]+)", r) if r.startswith("OK") and "ProductionLine" in r else None
             if m:
@@ -53,7 +60,8 @@ class ProductionLog:
         self.proc = Process()
         self.reader = Reader(self.proc)
         self.names = names or Names()
-        self.last, self.day = None, None
+        self.last, self.day, self.days = None, None, 0
+        self.lines = {}             # line id -> address
         self.mio, self.mio_read = {}, set()   # MIO id -> token; tags whose block was read
         new = not os.path.exists(path)
         self.f = open(path, "a", encoding="utf-8")
@@ -64,14 +72,24 @@ class ProductionLog:
         """Token of MIO MID, reading TAG's block for its MIOs if MID isn't known yet."""
         if mid not in self.mio and tag and tag not in self.mio_read:
             self.mio_read.add(tag)
-            text = "\n".join(send(f"bridge.country {tag}"))
+            text = "\n".join(shared.country(tag))
             self.mio.update((int(i), t) for t, i in _MIO.findall(text))
         return self.mio.get(mid, "")
 
-    def scan(self):
+    def _lines(self, full):
+        p = self.proc
+        if full or not self.lines:
+            self.lines = _addresses()
+        else:
+            self.lines = {k: a for k, a in self.lines.items()
+                          if p.i32(a + 0xc) == k and "ProductionLine" in (p.class_of(a) or "")}
+            self.lines.update(_addresses(20, max(self.lines, default=0) + 1))
+        return self.lines
+
+    def scan(self, full=True):
         """{line id: (owner, design id, design name, factories, priority, manufacturer, manufacturer name)}."""
         p, out = self.proc, {}
-        for lid, a in _addresses().items():
+        for lid, a in self._lines(full).items():
             v = p.u64(a + 0x88)
             if v and p.class_of(v) == "CEquipmentVariant":
                 owner, did, name = self.names.tag(p.i32(v + 0x1c)), str(p.i32(v + 0xc)), self.reader.variant(v).name
@@ -87,10 +105,13 @@ class ProductionLog:
         "1936-01-01 12:00" (the text before the space). LINES: the record lines added since the last call. Returns
         the rows written."""
         day = date.split(",", 1)[1] if "," in date else date.split(" ", 1)[0]
-        if self.last is not None and day == self.day and not any(f"\t{c}\t" in ln for ln in lines for c in CLASSES):
+        command = any(f"\t{c}\t" in ln for ln in lines for c in CLASSES)
+        if self.last is not None and day == self.day and not command:
             return 0
+        if day != self.day:
+            self.days += 1
         self.day = day
-        now = self.scan()
+        now = self.scan(self.last is None or self.days % FULL_DAYS == 4)
         if self.last is None:
             rows = [("start", k, v) for k, v in sorted(now.items())]
         else:

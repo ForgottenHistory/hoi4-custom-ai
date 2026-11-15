@@ -35,6 +35,7 @@ The player's commands (in command_record.tsv):
 import os
 import re
 
+from hoi4ai import shared
 from hoi4bridge import send
 
 FULL_DAYS = 7
@@ -87,7 +88,7 @@ class GeneralLog:
 
     def find(self):
         found = {}
-        for a in self.proc.find_objects(CLASS):
+        for a in shared.objects(CLASS):
             if self._valid(a):
                 lid = self.proc.i32(a + 0xc)
                 if 0 < lid and self.proc.i32(a + 0x120) >= 0:
@@ -117,7 +118,7 @@ class GeneralLog:
 
     def armies(self, tag):
         """{leader id: "ID name"} of the armies and army groups of TAG that have a leader."""
-        r = send(f"bridge.country {tag}")
+        r = shared.country(tag)
         text = "\n".join(r) if r and r[0].startswith("OK") else ""
         groups = dict.fromkeys(_GROUP.findall(text))
         out = {}
@@ -130,17 +131,22 @@ class GeneralLog:
                 out[self.proc.i32(ldr + 0xc)] = f"{gid} {name}"
         return out
 
-    def read(self, tag):
-        p, cid, out = self.proc, None, {}
-        army = self.armies(tag)
+    def _groups(self):
+        """{tag: [(leader id, address)]} of the known leaders (dropping those no longer there)."""
+        p, out = self.proc, {}
         for lid, a in list(self.leaders.items()):
             if not self._valid(a, lid):
                 del self.leaders[lid]
                 continue
             owner = self.names.tag(p.i32(a + 0x120))
             self.owner[lid] = owner
-            if owner != tag:
-                continue
+            out.setdefault(owner, []).append((lid, a))
+        return out
+
+    def read(self, tag, groups=None):
+        p, out = self.proc, {}
+        army = self.armies(tag)
+        for lid, a in (groups if groups is not None else self._groups()).get(tag, ()):
             marshal, role = p.i32(a + 0xde8) & 0xff, p.i32(a + 0xe7c)
             if not marshal and role != 1:
                 continue
@@ -172,12 +178,12 @@ class GeneralLog:
                 todo += self.tags
         if new_day:
             todo += self.tags
-            if not self.started or self.days % FULL_DAYS == 0:
-                todo += list(self.others() or ())
+            todo += list(self.others() or ()) if not self.started else shared.part(self.others(), self.days, FULL_DAYS)
         self.day = day
         rows = []
+        groups = self._groups() if todo else {}
         for tag in dict.fromkeys(todo):
-            now, last = self.read(tag), self.held.get(tag)
+            now, last = self.read(tag, groups), self.held.get(tag)
             for lid, v in sorted(now.items()):
                 old = None if last is None else last.get(lid)
                 if last is None or old is None:

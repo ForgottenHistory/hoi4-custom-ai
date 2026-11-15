@@ -10,6 +10,7 @@ import argparse
 import os
 import re
 import struct
+import sys
 from collections import Counter, defaultdict
 
 GAME = r"C:\Program Files (x86)\Steam\steamapps\common\Hearts of Iron IV"
@@ -20,16 +21,18 @@ def day_of(date_text: str) -> str:
 
 
 def load(path):
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    from hoi4ai.clock import Clock
+    clock = Clock()
     rows, player, date = [], None, "?"
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             p = line.rstrip("\n").split("\t")
+            date = day_of(clock.feed(line)) or "?"     # the command's in-game day, from the hourly ticks
             if p[0] == "#mark":
                 text = p[2]
                 if text.startswith("player="):
                     player = text[7:]
-                elif text.startswith("date="):
-                    date = day_of(text[5:])
                 continue
             if p[0].startswith("#") or len(p) < 8:
                 continue
@@ -46,9 +49,9 @@ def parse_extra(text):
         return out
     for tok in text.split(" "):
         key, _, val = tok.partition("=")
-        if key.startswith("L"):
+        if key.startswith("L+"):
             out[key] = [e for e in val.strip("[]").split(",") if e]
-        elif key.startswith("D"):
+        elif key.startswith("D+"):
             cls, _, num = val.partition("=")
             out[key] = (cls.split(".")[0], int(num))
         else:

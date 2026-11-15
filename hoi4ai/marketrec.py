@@ -27,6 +27,7 @@ A CPurchaseContract@NInternationalMarket (bridge.object 81 ID): seller country i
 import os
 import re
 
+from hoi4ai import shared
 from hoi4bridge import send
 
 FULL_DAYS = 7
@@ -99,7 +100,7 @@ class MarketLog:
         return out
 
     def listing(self, tag):
-        r = send(f"bridge.country {tag}")
+        r = shared.country(tag)
         text = "\n".join(r) if r and r[0].startswith("OK") else ""
         m = re.search(r"market_stockpile=\{(.*?)allow_zero_entries", text, re.S)
         out = {}
@@ -118,8 +119,8 @@ class MarketLog:
             self.days += 1
         self.day = day
         todo = list(self.tags)
-        if self.last is None or self.days % FULL_DAYS == 0:
-            todo += [t for t in (self.others() or ()) if t not in self.tags]
+        others = (self.others() or ()) if self.last is None else shared.part(self.others(), self.days, FULL_DAYS)
+        todo += [t for t in others if t not in self.tags]
         for t in todo:
             self.listings[t] = self.listing(t)
         now = self.contracts()

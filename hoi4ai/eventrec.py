@@ -13,10 +13,13 @@ In the game's memory a CEvent (bridge.object 50 ID) has its name as a std::strin
 +0x368 (pointer array, count +0x370); a CEventOption has its name ("AAT_norway.9.a") at +0x178.
 
 EventLog(record, out).step() appends the choices recorded since the last call to events.tsv; cmdrec.py calls it
-after each date mark. tools/events.py decodes a whole record afterwards.
+after each date mark. Each row's date is the in-game hour of its command (hoi4ai.clock: hourly ticks
+counted from the marks). tools/events.py decodes a whole record afterwards.
 """
 import os
 import re
+
+from hoi4ai.clock import Clock
 
 from hoi4bridge import BridgeError, send
 
@@ -96,6 +99,7 @@ class Names:
 class EventLog:
     def __init__(self, record, out, names=None):
         self.record, self.pos, self.date, self.lines = record, 0, "", []
+        self.clock = Clock()
         self.names = names or Names()
         new = not os.path.exists(out)
         self.f = open(out, "a", encoding="utf-8")
@@ -117,8 +121,8 @@ class EventLog:
         n = 0
         self.lines = data[:end].decode("utf-8", errors="replace").splitlines()
         for line in self.lines:
-            if line.startswith("#mark\t") and "\tdate=" in line:
-                self.date = line.split("\tdate=", 1)[1].strip()
+            self.date = self.clock.feed(line)
+            if line.startswith("#mark\t"):
                 continue
             r = parse(line)
             if not r:

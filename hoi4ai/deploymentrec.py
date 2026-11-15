@@ -33,6 +33,7 @@ The player's commands (in command_record.tsv; the owner column is empty, the AI 
 import os
 import re
 
+from hoi4ai import shared
 from hoi4bridge import send
 from hoi4ai.logisticsrec import _block
 
@@ -106,7 +107,7 @@ class DeploymentLog:
             self.f.write(HEADER + "\n")
 
     def read(self, tag):
-        r = send(f"bridge.country {tag}")
+        r = shared.country(tag)
         return orders("\n".join(r)) if r and r[0].startswith("OK") else None
 
     def _todo(self, lines):
@@ -166,8 +167,7 @@ class DeploymentLog:
         if day != self.day:
             self.days += 1
             todo += self.tags
-            if not self.started or self.days % FULL_DAYS == 0:
-                todo += list(self.others() or ())
+            todo += list(self.others() or ()) if not self.started else shared.part(self.others(), self.days, FULL_DAYS)
         self.day = day
         rows = []
         for tag in dict.fromkeys(todo):

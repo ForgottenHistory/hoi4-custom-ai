@@ -13,7 +13,9 @@ field=old (e.g. "mission=none;region=38", "base=9").
 
 Reads at the first call and each new in-game day: TAGS (the recorded countries) each time, OTHERS() (a callable, e.g.
 MioLog's producing countries) every FULL_DAYS days, and TAGS at once after an air command in the record LINES on one
-of their wings or on no known wing (e.g. a deployment). A read covers every wing in the game (~1.5 s for 250).
+of their wings or on no known wing (e.g. a deployment). A read covers the wings these countries held at the last
+read and the ids past the highest seen (a new wing), every wing in the game (~1.5 s for 250) at the first call and
+every FULL_DAYS days.
 
 Read with bridge.write 69 ID (the wing as the game saves it: count, experience, mission={ type period active
 strategic_region }, tag, equipment, name) for every wing id from 1 to past the highest seen; the base from memory:
@@ -37,6 +39,7 @@ are written by install_rules() (L+0x28=[69:1,69:3]):
 import os
 import re
 
+from hoi4ai import shared
 from hoi4bridge import send
 
 FULL_DAYS = 7
@@ -122,27 +125,42 @@ class AirLog:
         if new:
             self.f.write(HEADER + "\n")
 
-    def _base(self, wid):
-        r = send(f"bridge.object {WING} {wid}")[0]
-        m = re.search(r"@0x([0-9a-fA-F]+)", r) if r.startswith("OK") else None
-        if not m:
-            return ""
-        pool = self.proc.u64(int(m.group(1), 16) + 0x28)
-        if not pool or self.proc.i32(pool + 0x18) != BASE:
-            return ""
-        return str(self.proc.i32(pool + 0x1c))
+    def _bases(self, ids):
+        """{wing id: air base id} of wings IDS."""
+        out = {}
+        for wid, r in zip(ids, send(*[f"bridge.object {WING} {i}" for i in ids]) if ids else ()):
+            m = re.search(r"@0x([0-9a-fA-F]+)", r) if r.startswith("OK") else None
+            pool = self.proc.u64(int(m.group(1), 16) + 0x28) if m else 0
+            out[wid] = str(self.proc.i32(pool + 0x1c)) if pool and self.proc.i32(pool + 0x18) == BASE else ""
+        return out
 
     def _state(self, base):
         if base and base not in self.state:
             self.state[base] = _get("\n" + "\n".join(send(f"bridge.write {BASE} {base}")), "state")
         return self.state.get(base, "")
 
-    def wings(self):
-        """{tag: {wing id: {field: value}}} of every wing in the game."""
+    def wings(self, ids=None):
+        """{tag: {wing id: {field: value}}} of wings IDS and those past the highest id seen; of every wing in the
+        game if IDS is None."""
         out, wid, last = {}, 1, 0
-        while wid <= max(self.top, last) + 64:
-            batch = range(wid, wid + 256)
-            for text in _segments(send(*[f"bridge.write {WING} {i}" for i in batch])):
+        if ids is not None:
+            ids = list(ids)
+            for i in set(ids) - set(self._wings(ids, out)):
+                self.owner.pop(i, None)
+            wid = self.top + 1
+            while self._wings(range(wid, wid + 32), out):
+                wid += 32
+        while ids is None and wid <= max(self.top, last) + 64:
+            last = max([last] + self._wings(range(wid, wid + 256), out))
+            wid += 256
+        self.top = max([self.top] + [i for ws in out.values() for i in ws])
+        return out
+
+    def _wings(self, ids, out):
+        """Reads wings IDS into OUT ({tag: {wing id: fields}}); returns the ids found."""
+        found, ids = [], list(ids)
+        for k in range(0, len(ids), 256):
+            for text in _segments(send(*[f"bridge.write {WING} {i}" for i in ids[k:k + 256]])):
                 if not text.startswith("OK"):
                     continue
                 i = re.search(r"id=\{ id=(\d+) type=69 \}", text)
@@ -150,7 +168,7 @@ class AirLog:
                 if not i or not tag:
                     continue
                 i = int(i.group(1))
-                last = max(last, i)
+                found.append(i)
                 eq = re.search(r"equipment=\{\s*equipment=\{\s*id=\{ id=(\d+)", text)
                 mis = text[text.find("mission={"):] if "mission={" in text else ""
                 per = _get(mis, "period")
@@ -160,9 +178,7 @@ class AirLog:
                     "region": _get(mis, "strategic_region"),
                     "period": PERIODS[int(per)] if per.isdigit() and int(per) < len(PERIODS) else per,
                     "experience": _get(text, "experience")}
-            wid += 256
-        self.top = max(self.top, last)
-        return out
+        return found
 
     def step(self, date, lines=()):
         """DATE as for ProductionLog.step. Returns the rows written."""
@@ -171,23 +187,25 @@ class AirLog:
         for cls, ids in filter(None, map(parse, lines)):
             known = [self.owner[i] for i in ids if i in self.owner]
             todo += [t for t in known if t in self.tags] if known else self.tags   # others: the weekly read
-        if day != self.day:
+        new_day = day != self.day
+        if new_day:
             self.days += 1
             todo += self.tags
-            if not self.started or self.days % FULL_DAYS == 0:
-                todo += list(self.others() or ())
+            todo += list(self.others() or ()) if not self.started else shared.part(self.others(), self.days, FULL_DAYS)
         self.day = day
         rows = []
         todo = list(dict.fromkeys(todo))
         if todo:
-            every = self.wings()
+            full = not self.started or (new_day and self.days % FULL_DAYS == 2)
+            every = self.wings(None if full else [i for i, t in self.owner.items() if t in todo])
             for tag, ws in every.items():
                 for i in ws:
                     self.owner[i] = tag
             for tag in todo:
                 now, last = every.get(tag, {}), self.held.get(tag)
+                bases = self._bases(sorted(now))
                 for i, v in now.items():
-                    v["base"] = self._base(i)
+                    v["base"] = bases.get(i, "")
                     v["state"] = self._state(v["base"])
                 for i, v in sorted(now.items()):
                     old = None if last is None else last.get(i)

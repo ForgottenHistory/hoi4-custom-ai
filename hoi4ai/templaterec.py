@@ -1,9 +1,10 @@
 """Division templates of every country, recorded whenever they change.
 
-TemplateLog(path).step(date, lines) rescans every template (handle 52, ids from 1 up; about 1 s) at the first call,
-when the new record LINES hold a template command, every FULL_DAYS in-game days (effects such as a focus can change
-templates without a command) and when a new id turns up past the highest known (probed each new day, about 0.1 s),
-and writes what differs from the last scan:
+TemplateLog(path).step(date, lines) finds every template by id (handle 52, ids from 1 up; about 1 s) at the first
+call and every FULL_DAYS in-game days (effects such as a focus can change templates without a command); when the
+new record LINES hold a template command (the AI's too, which at speed 5 is most steps) or a new id turns up past
+the highest known (probed each new day, about 0.1 s), it reads the templates found before (checking each still holds
+its handle) and the ids past the highest known, and writes what differs from the last read:
   date  change (start / new / changed / removed)  id  owner  name  obsolete  battalions  support
 battalions are the designer's grid: columns separated by "|", top to bottom, empty slots left out
 ("infantry,infantry,infantry|infantry,infantry,infantry|..."); support is the support companies in order; obsolete
@@ -59,6 +60,7 @@ class TemplateLog:
         self.reader = Reader(self.proc)
         self.names = names or Names()
         self.last, self.day, self.days = None, None, 0
+        self.found = {}             # template id -> address
         new = not os.path.exists(path)
         self.f = open(path, "a", encoding="utf-8")
         if new:
@@ -79,11 +81,21 @@ class TemplateLog:
             cols.pop()
         return "|".join(cols)
 
-    def scan(self):
+    def _addresses(self, full):
+        p = self.proc
+        if full or not self.found:
+            self.found = _ids_and_addresses()
+        else:
+            self.found = {t: a for t, a in self.found.items() if p.i32(a + 8) == 52 and p.i32(a + 0xc) == t}
+            top = max(self.found, default=0)
+            self.found.update(_probe(range(top + 1, top + 51)))
+        return self.found
+
+    def scan(self, full=True):
         """{id: (owner tag, name, obsolete, battalions, support)}."""
         from hoi4ai.templates import _string
         out = {}
-        for tid, a in _ids_and_addresses().items():
+        for tid, a in self._addresses(full).items():
             flag = self.proc.read(a + 0x236, 1)
             out[tid] = (self.names.tag(self.proc.i32(a + 0x1ec)), _string(self.proc, a + 0x20),
                         str(flag[0]) if flag else "", self._slots(a + 0x68, True), self._slots(a + 0x88, False))
@@ -94,17 +106,18 @@ class TemplateLog:
         "1936-01-01 12:00" (the text before the space). LINES: the record lines added since the last call. Returns the
         rows written."""
         day = date.split(",", 1)[1] if "," in date else date.split(" ", 1)[0]
-        full = self.last is None or any(f"\t{c}\t" in ln for ln in lines for c in CLASSES)
+        full = self.last is None
+        read = full or any(f"\t{c}\t" in ln for ln in lines for c in CLASSES)
         if day != self.day:
             self.day, self.days = day, self.days + 1
-            if self.days % FULL_DAYS == 0:
-                full = True
-            elif not full:
-                top = max(self.last, default=0)
-                full = bool(_probe(range(top + 1, top + 51)))
-        if not full:
+            full = full or self.days % FULL_DAYS == 6
+            if not read and not full:
+                top = max(self.found, default=0)
+                read = bool(_probe(range(top + 1, top + 51)))
+            read = read or full
+        if not read:
             return 0
-        now = self.scan()
+        now = self.scan(full)
         rows = []
         if self.last is None:
             rows = [("start", t, v) for t, v in sorted(now.items())]
