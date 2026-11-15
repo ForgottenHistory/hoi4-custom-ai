@@ -64,7 +64,7 @@ None of these send anything to the game.
 
 Records a war while you (or the game's AI) fight it. Start the game (play the country, or `observe`), then run
 this. Every `--hours` in-game hours it writes every division of the country and its enemies and who controls each
-province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), national focus, laws, advisors and national spirits (`politics.tsv`), construction lines (`construction.tsv`), trade deals and auto-import settings (`trade.tsv`), pacts, wars, wargoals and factions (`diplomacy.tsv`), occupation laws and garrison templates (`occupation.tsv`), fuel prioritization, army motorization and exercises (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), air wings (`air.tsv`), task forces and admirals (`naval.tsv`, `admirals.tsv`), research slots and finished techs (`research.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
+province (`hoi4ai/battlerec.py`), its battle plans when they changed (`plans.tsv`, `hoi4ai/planrec.py`), its state each day (`country/`, `country.tsv`, as cmdrec), the events answered (`events.tsv`), every country's division templates as they change (`division_templates.tsv`), every country's equipment designs and obsolete designs (`equipment_designs.tsv`) and production lines (`production_lines.tsv`), MIO sizes and traits (`mios.tsv`), market contracts and listings (`market.tsv`), every country's doctrines (`doctrines.tsv`), officer corps spirits (`spirits.tsv`), national focus, laws, advisors and national spirits (`politics.tsv`), construction lines (`construction.tsv`), trade deals and auto-import settings (`trade.tsv`), pacts, wars, wargoals and factions (`diplomacy.tsv`), occupation laws and garrison templates (`occupation.tsv`), decisions taken, ignored, running and available (`decisions.tsv`), fuel prioritization, army motorization and exercises (`logistics.tsv`), training and deployment (`deployment.tsv`), generals (`generals.tsv`), air wings (`air.tsv`), task forces and admirals (`naval.tsv`, `admirals.tsv`), research slots and finished techs (`research.tsv`), and every command the game executes (`bridge.cmdrec`, with the date stamped
 in). It stops a step after the target capitulates, `--war-days` after the declaration, or on Ctrl+C. The
 controller records the same way by itself. Output: `recordings/battle_<label>_<TAG>_<time>/`.
 
@@ -287,6 +287,22 @@ Resistance, compliance and garrison strength are left out. `CReleaseCountryComma
 +0x2c the released, then one byte per box (+0x30 play as, +0x31 puppet, +0x32 retain cores; puppet is sure, the other two
 likely). A released puppet also
 shows in `diplomacy.tsv`. `--no-occupation` turns it off.
+
+Decisions (`hoi4ai/decisionrec.py`): `decisions.tsv` gets date, change, country, decision, target, value, was. A
+`taken` row for each decision the country takes (`CSelectDecisionCommand`,
+`CSelectTargetedDecisionCommand`) and an `ignored` row for each one ignored (`CIgnoreDecisionCommand`,
+`CIgnoreTargetedDecisionCommand`; decision `all` for `CIgnoreAllAvailableDecisionCommand`; `unignored` when it took
+one off the ignore list), from the command: +0x28 the country id, +0x2c a targeted decision's target id, and a
+pointer to the decision, a `CDecision` (name string at +0x120) or a `CTargetedDecision` (its `CDecision` at +0x10).
+An ignore command's pointer is no decision, so it is named from what the read right after it finds added to (or
+taken off) the ignore list. Only the country's own commands are written: the AI takes hundreds of decisions a day,
+and the other countries' show in their status. Then the country's decision status at its first read
+(`start`) and each change of it (`new`, `changed`, `removed`): running decisions and missions (`active N days`),
+cooldowns (`re_enable_cooldown N days`), available targeted decisions (`available`, `available ignored`) and the
+ignore list (`ignored`), from `decision_status={ active_timed_decision={...} active_targeted_decision={...} }` and
+`player_settings={ ignore_decisions={...} }` in the save-format block; the days
+left don't count as a change. Read for the country each day, other producing countries spread over 7 days, and the
+country at once after a decision command. `--no-decisions` turns it off.
 
 Logistics (`hoi4ai/logisticsrec.py`): `logistics.tsv` gets each country's fuel prioritization and each army's
 motorization priority and exercises at its first read and then each change: date, change (`start`, `new`, `changed`, `removed`),
