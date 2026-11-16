@@ -142,6 +142,8 @@ def facilities(text):
                         h = _block(hist, pos)
                         pos = hist.find(h, pos) + len(h)
                         k += 1
+                        if _get(h, "option") in ("", "undefined"):      # the game's empty placeholder entry
+                            continue
                         ctx = dict(_entries(h)).get("context", "")
                         char = re.search(r"character=\{ id=(\d+)", ctx)
                         out["reward", f"{n}#{k}"] = {
