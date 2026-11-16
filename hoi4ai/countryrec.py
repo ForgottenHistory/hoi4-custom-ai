@@ -6,8 +6,9 @@ CountryLog(folder, tag).step(day) writes, once per day:
   country.tsv         a row of headline numbers: VARIABLES (script game variables through bridge.query), then stability
                       and war support from the block
   equipment.tsv       equipment variants the block names (handle 70): name, type, modules; written once each
-  states.tsv          who owns and who controls every state of every country: date, state, owner, controller. The
-                      first day lists every state, after that a row only where either changed
+  states.tsv          owner, controller and cores (tags, space-separated) of every state of every country: date, state,
+                      owner, controller, cores. The first day lists every state, after that a row only where one changed
+  control.tsv         who controls each province (live.Provinces): date, province, controller; changes only after day one
   intel.tsv           the country's intel over every other existing country, 0-100 (negative: their counter-intelligence
                       outweighs it): civilian, army, navy, air. This is the player's fog of war: the map shows what army
                       intel allows (below 10% division counts are "?", then counts with an error range shrinking to
@@ -48,15 +49,20 @@ def numbers(tag, block):
 
 
 def states():
-    """{state id: (owner tag, controller tag)} for every state of every existing country (one script query)."""
+    """{state id: (owner tag, controller tag, cores)} for every state of every existing country (one script query);
+    cores is the tags that have a core on the state, sorted, joined by spaces."""
     lines = query('every_country = { limit = { exists = yes } every_owned_state = { log = "O|[THIS.GetID]|[PREV.GetTag]" } '
-                  'every_controlled_state = { limit = { NOT = { is_owned_by = PREV } } log = "C|[THIS.GetID]|[PREV.GetTag]" } }')
-    owner, ctrl = {}, {}
+                  'every_controlled_state = { limit = { NOT = { is_owned_by = PREV } } log = "C|[THIS.GetID]|[PREV.GetTag]" } '
+                  'every_core_state = { log = "K|[THIS.GetID]|[PREV.GetTag]" } }')
+    owner, ctrl, core = {}, {}, {}
     for line in lines:
         p = line.strip().split("|")
-        if len(p) == 3 and p[1].isdigit() and p[0] in ("O", "C"):
-            (owner if p[0] == "O" else ctrl)[int(p[1])] = p[2]
-    return {i: (o, ctrl.get(i, o)) for i, o in owner.items()}
+        if len(p) == 3 and p[1].isdigit() and p[0] in ("O", "C", "K"):
+            if p[0] == "K":
+                core.setdefault(int(p[1]), []).append(p[2])
+            else:
+                (owner if p[0] == "O" else ctrl)[int(p[1])] = p[2]
+    return {i: (o, ctrl.get(i, o), " ".join(sorted(core.get(i, [])))) for i, o in owner.items()}
 
 
 def intel(tag):
@@ -101,13 +107,20 @@ class CountryLog:
         self.f_eq = self._open("equipment.tsv", "id\tname\ttype\tmodules")
         self.f_intel = self._open("intel.tsv", "date\ttarget\t" + "\t".join(INTEL))
         self.equipment = set()
-        self.f_states = self._open("states.tsv", "date\tstate\towner\tcontroller")
-        self.states = {}                        # last written, so a restart carries on instead of repeating every state
+        self.f_states = self._open("states.tsv", "date\tstate\towner\tcontroller\tcores")
+        self.f_control = self._open("control.tsv", "date\tprovince\tcontroller")
+        self.states, self.control = {}, {}      # last written, so a restart carries on instead of repeating everything
         with open(os.path.join(folder, "states.tsv"), encoding="utf-8") as h:
             for line in list(h)[1:]:
                 p = line.rstrip("\n").split("\t")
-                if len(p) == 4 and p[1].isdigit():
-                    self.states[int(p[1])] = (p[2], p[3])
+                if len(p) == 5 and p[1].isdigit():
+                    self.states[int(p[1])] = (p[2], p[3], p[4])
+        with open(os.path.join(folder, "control.tsv"), encoding="utf-8") as h:
+            for line in list(h)[1:]:
+                p = line.rstrip("\n").split("\t")
+                if len(p) == 3 and p[1].isdigit():
+                    self.control[int(p[1])] = p[2]
+        self.provinces, self.names = None, None
 
     def _open(self, name, header):
         path = os.path.join(self.folder, name)
@@ -132,17 +145,32 @@ class CountryLog:
             self.f_intel.write(day + "\t" + "\t".join(row) + "\n")
         for sid, v in sorted(states().items()):
             if self.states.get(sid) != v:
-                self.f_states.write(f"{day}\t{sid}\t{v[0]}\t{v[1]}\n")
+                self.f_states.write(f"{day}\t{sid}\t{v[0]}\t{v[1]}\t{v[2]}\n")
                 self.states[sid] = v
+        self._control(day)
         new = [i for i in handles(block, 70) if i not in self.equipment]
         for eid, a in _addresses(70, new).items():
             v = self.reader.variant(a)
             self.f_eq.write(f"{eid}\t{v.name}\t{v.type}\t{','.join(v.modules)}\n")
             self.equipment.add(eid)
-        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states):
+        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control):
             f.flush()
         return True
 
+    def _control(self, day):
+        """Who controls each province (live.Provinces): every province the first day, then only the changes. A state held
+        in part (a war's front line) shows here and not in states.tsv, which names one controller per state."""
+        from hoi4ai.eventrec import Names
+        from hoi4ai.live import Provinces
+        if self.provinces is None:
+            self.provinces, self.names = Provinces(self.proc), Names()
+        ctrl = self.provinces.refresh().controller
+        for p in range(1, len(ctrl)):
+            c = int(ctrl[p])
+            if c and self.control.get(p) != self.names.tag(c):
+                self.control[p] = self.names.tag(c)
+                self.f_control.write(f"{day}\t{p}\t{self.control[p]}\n")
+
     def close(self):
-        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states):
+        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control):
             f.close()

@@ -147,9 +147,8 @@ headline numbers (political power, manpower, factories, fuel, experience, stabil
 and the equipment variants the block names by id to `equipment.tsv` (the template ids are in
 `division_templates.tsv`). `intel.tsv` holds the country's intel (civilian, army, navy, air, 0-100) over every
 other country each day: the player's fog of war, since what the map shows of a country's army follows army intel
-(division counts "?" below 10%, then approximate; template details from 30%, exact from 80%). `states.tsv` holds who
-owns and who controls every state of every country (date, state, owner, controller): all states on the first day, then a
-row only where either changed (recordings made before 2026-11-16 do not have it). `--no-country` turns it off.
+(division counts "?" below 10%, then approximate; template details from 30%, exact from 80%). `states.tsv` holds who owns, who controls and who has a core on every state of every country (date, state, owner, controller, cores = tags separated by spaces): all states on the first day, then a
+row only where something changed. `control.tsv` holds who controls each province (date, province, controller): every province on the first day, then only changes, so a state held in part (a front line) shows there. Recordings made before 2026-11-16 have neither. `--no-country` turns it off.
 
 Events (`hoi4ai/eventrec.py`): every event any country answers, by click or AI pick, news events included, goes to
 `events.tsv` after each date mark: date, record line, the country answering, the country it came from (for a news
