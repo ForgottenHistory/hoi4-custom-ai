@@ -2,24 +2,46 @@
 
     python tools/map_now.py RECORDING_DIR [--tag GER] [--scale 3] [--out FILE] [--no-open]
 
-Every land province is coloured by who controls it; the --tag country is dark and the land it owns but others hold
+Every land province is coloured by who controls it, in the game's own country colours (common/countries colors, mods too; a tag with none gets a hash colour); the land --tag owns but others hold
 (or holds without owning) is outlined in the opposite way: owned-but-lost land is paler, land held without owning is
 hatched with the owner's colour. Tags are written at the middle of each country's land. The crop is Europe (the
 provinces whose continent index is 1, Europe) and the map comes from the recording's mods (dlc_load.json).
 """
 import argparse
 import collections
+import colorsys
 import csv
 import os
+import re
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import ImageDraw
 
 import _bridge  # noqa: F401
 from campaignmap import tag_colour
 from heatmap import SEA, font, panel
 from hoi4ai import mapdata
 from hoi4ai.gamefiles import GameFiles
+
+
+def read_colours(files):
+    """{tag: (r, g, b)}: the `color` of each tag in common/countries/*colors*.txt (base game, then mods in load order).
+    Written rgb { r g b } (0-255) or HSV { h s v } (0-1)."""
+    out = {}
+    for name, path in sorted(files.listdir("common/countries", ".txt").items()):
+        if "color" not in name.lower():
+            continue
+        text = re.sub(r"#[^\n]*", "", open(path, encoding="utf-8-sig", errors="replace").read())
+        for m in re.finditer(r"\b(\w+)\s*=\s*\{\s*color\s*=\s*(\w*)\s*\{([^}]*)\}", text):
+            v = [float(x) for x in m.group(3).split()]
+            if len(v) != 3:
+                continue
+            if m.group(2).lower() == "hsv":
+                v = [c * 255 for c in colorsys.hsv_to_rgb(*v)]
+            elif max(v) <= 1.0:
+                v = [c * 255 for c in v]
+            out[m.group(1)] = tuple(int(round(c)) for c in v)
+    return out
 
 
 def read(path):
@@ -36,7 +58,8 @@ def main():
     ap.add_argument("--no-open", action="store_true")
     a = ap.parse_args()
     load = os.path.join(a.dir, "dlc_load.json")
-    m = mapdata.load(GameFiles(load=load if os.path.exists(load) else None))
+    files = GameFiles(load=load if os.path.exists(load) else None)
+    m = mapdata.load(files)
     ids = mapdata.province_image(m)
     control = {int(r["province"]): r["controller"] for r in read(os.path.join(a.dir, "control_now.tsv"))}
     day = read(os.path.join(a.dir, "control_now.tsv"))[0]["date"]
@@ -50,8 +73,10 @@ def main():
     y0, y1 = max(0, int(ys[k]) - 20), min(m.height, int(ys[-1 - k]) + 20)
     crop, scale = (y0, y1, x0, x1), a.scale
 
+    game = read_colours(files)
+
     def colour(t):
-        return (60, 64, 72) if t == a.tag else tag_colour(t)
+        return game.get(t) or tag_colour(t)
 
     def base(p):
         pr = m.provinces.get(p)
@@ -89,7 +114,7 @@ def main():
         if pr and c != o and o and pr.kind == "land" and x0 <= pr.x < x1 and y0 <= pr.y < y1 and a.tag in (c, o):
             cx, cy = (pr.x - x0) * scale, (pr.y - y0) * scale
             d.ellipse((cx - 3, cy - 3, cx + 3, cy + 3), fill=colour(o if c == a.tag else c), outline=(255, 255, 255))
-    d.text((10, 10), f"{day}   {a.tag} dark; its land held by others pale; dots = occupied or lost provinces",
+    d.text((10, 10), f"{day}   in-game country colours; {a.tag}'s land held by others pale; dots = occupied or lost provinces",
            fill=(20, 20, 20), font=font(16), stroke_width=2, stroke_fill=(255, 255, 255))
     out = a.out or os.path.join(a.dir, f"map_now_{a.tag}.png")
     img.save(out)
