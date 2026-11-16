@@ -225,29 +225,41 @@ def unit_tile(key, icons):
     return f'<i class="ut" title="{label}"><span>{label[:6]}</span></i>'
 
 
-def templates_html(templates, d1):
-    """One card per template, drawn like the in-game designer: support companies on top, then the battalion rows;
-    the brigade-type (combat support) unit of a row sits at the side of it. Each `|` group of the recording is a row."""
+def templates_html(rec, tag):
+    """One card per template of the player, in its final form: support companies on top, then the designer's grid.
+    Each `|` group of the recording is a column and its items run top to bottom (empty slots are not recorded)."""
     from icons import Icons
-    icons = Icons(LOC.roots)
-    seen, cards = set(), []
-    for t in templates:
-        if t["change"] != "new":
+    from report_sections import rows_of
+    h, rows = rows_of(rec, "division_templates", owner=tag)
+    if not rows:
+        return None
+    ix = {c: i for i, c in enumerate(h)}
+    state, first, edits = {}, {}, Counter()
+    for r in rows:
+        tid = r[ix["id"]]
+        if r[ix["change"]] == "removed":
+            state.pop(tid, None)
             continue
-        rows = [r.split(",") for r in (t["battalions"] or "").split("|") if r]
-        sup = [x for x in (t["support"] or "").split(",") if x]
-        body = ""
-        if sup:
-            body += '<div class="trow sup">' + "".join(unit_tile(k, icons) for k in sup) + "</div>"
-        for r in rows:
-            main = [k for k in r if icons.unit(k)["group"] != "combat_support"]
-            side = [k for k in r if icons.unit(k)["group"] == "combat_support"]
-            body += ('<div class="trow">' + "".join(unit_tile(k, icons) for k in main) +
-                     (f'<b class="side">{"".join(unit_tile(k, icons) for k in side)}</b>' if side else "") + "</div>")
-        n = sum(len(r) for r in rows)
-        cards.append(f'<div class="tpl"><h4>{esc(t["name"])}</h4><small>{esc(t["date"][:10])} · {n} battalions'
-                     f'{f", {len(sup)} support" if sup else ""}</small>{body}</div>')
-    return f'<p class="lead">{len(cards)} templates you made. Support companies on top, battalions in rows below, brigade support at the side of its row. Hover an icon for its name.</p><div class="tpls">{"".join(cards)}</div>'
+        if tid not in first:
+            first[tid] = r[0]
+        elif r[ix["change"]] == "changed":
+            edits[tid] += 1
+        state[tid] = r
+    icons = Icons(LOC.roots)
+    cards = []
+    for tid, r in state.items():
+        cols = [c.split(",") for c in r[ix["battalions"]].split("|") if c]
+        sup = [x for x in r[ix["support"]].split(",") if x]
+        d = day(first[tid])
+        n = sum(len(c) for c in cols)
+        meta = f'{n} battalions' + (f', {len(sup)} support' if sup else "")
+        grid = "".join('<div class="tcol">' + "".join(unit_tile(k, icons) for k in c) + "</div>" for c in cols)
+        cards.append(f'<div class="tpl"><h4>{esc(r[ix["name"]])}</h4><small>{meta}</small>'
+                     + (f'<div class="tsup">{"".join(unit_tile(k, icons) for k in sup)}</div>' if sup else "")
+                     + f'<div class="tgrid">{grid}</div>'
+                     + f'<small class="when">{d.isoformat() if d else ""}{f" · edited {edits[tid]}×" if edits[tid] else ""}</small></div>')
+    return (f'<p class="lead">{len(cards)} templates of {esc(tag)}, as they ended. Support companies on top, then the battalion columns '
+            f'(each column runs top to bottom). Hover an icon for its name.</p><div class="tpls">{"".join(cards)}</div>')
 
 
 def build(rec):
@@ -326,7 +338,9 @@ def build(rec):
     sec.append(("Research, events and decisions per year",
                 table(["year", "techs started", "event choices", "decisions"], [(y, yr[y], ev[y], dc[y]) for y in years]) +
                 "<h3>Techs in order</h3><p class='small'>" + ", ".join(nm(r["tech"]) for r in ch["research"]) + "</p>"))
-    sec.append(("Division templates", templates_html(ch["templates"], d1)))
+    tpl = templates_html(rec, meta["player"])
+    if tpl:
+        sec.append(("Division templates", tpl))
 
     # paradrops
     pd_path = os.path.join(rec, "paradrops.tsv")
@@ -419,13 +433,16 @@ details{margin:10px 0}summary{cursor:pointer;color:var(--accent);font-size:13px;
 summary:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 .small{font-size:12px;color:var(--ink2)}ul{padding-left:20px;color:var(--ink2);max-width:72ch}li{margin:4px 0}
 /* templates */
-.tpls{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
-.tpl{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;min-width:0}
-.tpl h4{font:600 14px/1.25 var(--display);margin:0;overflow-wrap:anywhere}.tpl small{display:block;color:var(--ink2);font-size:12px;margin:2px 0 10px}
-.trow{display:flex;gap:4px;margin-top:4px;align-items:center}.trow.sup{padding-bottom:8px;margin-bottom:4px;border-bottom:1px dashed var(--line)}
-.ut{width:38px;height:30px;flex:none;background:#e4e6ea;border:1px solid #b9bdc6;border-radius:3px;display:flex;align-items:center;justify-content:center;font-style:normal}
-.ut{background-repeat:no-repeat;background-position:center;background-size:contain;background-origin:content-box;padding:3px}.ut span{font-size:9px;color:#333}
-.side{margin-left:auto;padding-left:8px;border-left:1px solid var(--line);display:flex;gap:4px}
+.tpls{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start}
+.tpl{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px 10px;min-width:150px;max-width:100%}
+.tpl h4{font:600 14px/1.25 var(--display);margin:0}.tpl small{display:block;color:var(--ink2);font-size:12px}
+.tpl small.when{margin-top:10px;font-size:11px}
+.tsup{display:flex;flex-wrap:wrap;gap:4px;margin:10px 0 8px;padding-bottom:8px;border-bottom:1px dashed var(--line);max-width:260px}
+.tgrid{display:flex;gap:4px;margin-top:8px;overflow-x:auto}.tsup+.tgrid{margin-top:0}
+.tcol{display:flex;flex-direction:column;gap:4px}
+.ut{width:38px;height:30px;flex:none;border:1px solid #b9bdc6;border-radius:3px;display:block;font-style:normal;text-align:center;line-height:28px;background-color:#e4e6ea;
+  background-repeat:no-repeat;background-position:center;background-size:contain;background-origin:content-box;padding:3px}
+.ut span{font-size:9px;color:#333}
 footer{padding-block:48px;color:var(--ink2);font-size:12px}
 @media (max-width:520px){h2{font-size:21px}.stat b{font-size:19px}}
 """
