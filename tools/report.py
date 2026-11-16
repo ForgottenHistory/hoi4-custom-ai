@@ -247,6 +247,13 @@ def templates_html(rec, tag):
         state[tid] = r
     icons = Icons(LOC.roots)
     has_reg = "regiment" in ix
+    now = {}                                    # older recordings: tools/regiment_snapshot.py wrote the live state
+    try:
+        for ln in open(os.path.join(rec, "regiment_now.tsv"), encoding="utf-8").read().splitlines()[1:]:
+            f = ln.split("	")
+            now[f[0]] = f[3] if len(f) > 3 else ""
+    except OSError:
+        pass
     cards = []
     for tid, r in state.items():
         cols = [c.split(",") for c in r[ix["battalions"]].split("|") if c]
@@ -259,7 +266,8 @@ def templates_html(rec, tag):
         for c in range(ncol):
             col = cols[c] if c < len(cols) else []
             cells += '<div class="tcol">' + "".join(unit_tile(k, icons) for k in col) +                      "".join('<i class="ut empty">+</i>' for _ in range(nrow - len(col))) + "</div>"
-        reg = r[ix["regiment"]].split(",") if "regiment" in ix and len(r) > ix["regiment"] else None
+        raw = r[ix["regiment"]] if has_reg and len(r) > ix["regiment"] else now.get(tid)
+        reg = raw.split(",") if raw is not None else None
         rrow = ""
         if reg is not None:
             rrow = ('<div class="treg"><b>Regimental support</b><div class="tgrid">' +
@@ -272,7 +280,7 @@ def templates_html(rec, tag):
                      f'<div class="tdes"><div><div class="tgrid">{cells}</div>{rrow}</div>'
                      f'<div class="tsup"><b>Support</b><div class="tsl" style="--rows:{min(5, len(sup) + 1)}">{scol}</div></div></div></div>')
     return (f'<p class="lead">{len(cards)} templates of {esc(tag)}, as they ended. Laid out like the division designer: battalion columns on the left, support companies on the right.'
-            f' Hover an icon for its name. {"" if has_reg else "This recording predates the regimental support column, so that row is not shown."}</p><div class="tpls">{"".join(cards)}</div>')
+            f' Hover an icon for its name. {"" if has_reg else ("Regimental support is as the game had it when regiment_now.tsv was taken, not as it was edited." if now else "This recording predates the regimental support column, so that row is not shown.")}</p><div class="tpls">{"".join(cards)}</div>')
 
 
 def build(rec):
