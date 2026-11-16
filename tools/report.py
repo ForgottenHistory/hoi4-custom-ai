@@ -8,6 +8,7 @@ this reads their files and writes RECORDING_DIR/report.html:
   apm.json         actions per minute (optional)
   paradrops.tsv    paradrop lines and whether they landed (optional)
   reloads.json     reloads of an older save (optional; shown as a caveat)
+  occupation, naval, air, generals, admirals, trade, intelligence .tsv   the sections of the same names (report_sections.py)
 Every number on the page is read from those files; nothing is written by hand. Dates are the game's own where the
 files give them (wars: the war's real start); a pick's date is the date of the command that made it, `logged` the
 time the recorder read it.
@@ -17,8 +18,10 @@ import datetime
 import html
 import json
 import os
+import sys
 from collections import Counter, defaultdict
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 MONTHS = {m: i + 1 for i, m in enumerate(
     "January February March April May June July August September October November December".split())}
 PALETTE = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#76b7b2", "#edc948", "#b07aa1", "#9c755f", "#bab0ac", "#ff9da7"]
@@ -244,6 +247,9 @@ def build(rec):
         bc = sorted(apm["by_class"].items(), key=lambda kv: -kv[1]["actions"])[:12] if isinstance(apm.get("by_class"), dict) else []
         sec.append(("Your play (APM)", f'<p>{apm["actions"]} actions from {apm["commands"]} commands in {apm["record_minutes"]:.0f} minutes of play; '
                     f'busiest minute {apm["peak"]["actions"]} actions, at {esc(apm["peak"]["date"])}.</p>' + (table(["command class", "actions", "commands"], [(esc(k), v["actions"], v["commands"]) for k, v in bc]) if bc else "")))
+
+    import report_sections
+    sec += report_sections.sections(rec, meta["player"], d0, d1, wars)
 
     # caveats
     cav = ["Dates of focus, law and tech rows are the day of the command that made them (`date`); `logged` is when the recorder read them, which can be later.",
