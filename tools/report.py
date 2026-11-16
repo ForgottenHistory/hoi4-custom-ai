@@ -226,7 +226,7 @@ def unit_tile(key, icons):
 
 
 def templates_html(rec, tag):
-    """One card per template of the player, in its final form: support companies on top, then the designer's grid.
+    """One card per template of the player, in its final form, laid out like the designer.
     Each `|` group of the recording is a column and its items run top to bottom (empty slots are not recorded)."""
     from icons import Icons
     from report_sections import rows_of
@@ -246,6 +246,7 @@ def templates_html(rec, tag):
             edits[tid] += 1
         state[tid] = r
     icons = Icons(LOC.roots)
+    has_reg = "regiment" in ix
     cards = []
     for tid, r in state.items():
         cols = [c.split(",") for c in r[ix["battalions"]].split("|") if c]
@@ -258,14 +259,20 @@ def templates_html(rec, tag):
         for c in range(ncol):
             col = cols[c] if c < len(cols) else []
             cells += '<div class="tcol">' + "".join(unit_tile(k, icons) for k in col) +                      "".join('<i class="ut empty">+</i>' for _ in range(nrow - len(col))) + "</div>"
+        reg = r[ix["regiment"]].split(",") if "regiment" in ix and len(r) > ix["regiment"] else None
+        rrow = ""
+        if reg is not None:
+            rrow = ('<div class="treg"><b>Regimental support</b><div class="tgrid">' +
+                    "".join(unit_tile(reg[c], icons) if c < len(reg) and reg[c] else '<i class="ut empty">+</i>' for c in range(ncol)) +
+                    '</div></div>')
         scol = "".join(unit_tile(k, icons) for k in sup) + '<i class="ut empty">+</i>'
         cards.append(f'<div class="tpl"><h4>{esc(r[ix["name"]])}</h4>'
                      f'<small>{n} battalions{f", {len(sup)} support" if sup else ""} · {d.isoformat() if d else ""}'
                      f'{f" · edited {edits[tid]}×" if edits[tid] else ""}</small>'
-                     f'<div class="tdes"><div class="tgrid">{cells}</div>'
+                     f'<div class="tdes"><div><div class="tgrid">{cells}</div>{rrow}</div>'
                      f'<div class="tsup"><b>Support</b><div class="tsl" style="--rows:{min(5, len(sup) + 1)}">{scol}</div></div></div></div>')
     return (f'<p class="lead">{len(cards)} templates of {esc(tag)}, as they ended. Laid out like the division designer: battalion columns on the left, support companies on the right.'
-            f' Hover an icon for its name. Regimental support is not in the recording.</p><div class="tpls">{"".join(cards)}</div>')
+            f' Hover an icon for its name. {"" if has_reg else "This recording predates the regimental support column, so that row is not shown."}</p><div class="tpls">{"".join(cards)}</div>')
 
 
 def build(rec):
@@ -444,6 +451,7 @@ summary:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-of
 .tpl h4{font:600 15px/1.25 var(--display);margin:0;letter-spacing:.02em}.tpl small{display:block;color:#a9a79c;font-size:11px;margin:2px 0 12px}
 .tdes{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
 .tgrid{display:flex;gap:7px}.tcol{display:flex;flex-direction:column;gap:7px}
+.treg{margin-top:12px}.treg b{display:block;font:600 11px/1 var(--body);letter-spacing:.06em;text-transform:uppercase;color:#a9a79c;margin-bottom:9px}
 .tsup{border-left:1px solid #3a3d34;padding-left:14px}.tsup b{display:block;font:600 11px/1 var(--body);letter-spacing:.06em;text-transform:uppercase;color:#a9a79c;margin-bottom:9px}
 .tsl{display:grid;grid-auto-flow:column;grid-template-rows:repeat(var(--rows),auto);gap:7px}
 .ut{width:46px;height:36px;flex:none;border:1px solid #4a4d43;border-radius:3px;display:block;font-style:normal;text-align:center;line-height:34px;

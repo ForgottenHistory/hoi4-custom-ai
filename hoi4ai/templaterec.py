@@ -5,10 +5,11 @@ call and every FULL_DAYS in-game days (effects such as a focus can change templa
 new record LINES hold a template command (the AI's too, which at speed 5 is most steps) or a new id turns up past
 the highest known (probed each new day, about 0.1 s), it reads the templates found before (checking each still holds
 its handle) and the ids past the highest known, and writes what differs from the last read:
-  date  change (start / new / changed / removed)  id  owner  name  obsolete  battalions  support
+  date  change (start / new / changed / removed)  id  owner  name  obsolete  battalions  support  regiment
 battalions are the designer's grid: columns separated by "|", top to bottom, empty slots left out
 ("infantry,infantry,infantry|infantry,infantry,infantry|..."); support is the support companies in order; obsolete
-is 1 once the country decommissions the template (the designer's button; it stays, hidden from new divisions).
+regiment is the regimental support, one entry per column (an empty column is an empty entry);
+obsolete is 1 once the country decommissions the template (the designer's button; it stays, hidden from new divisions).
 
 The commands themselves (in command_record.tsv) say who acted; edits keep the template id:
   CCreateDivisionTemplateCommand       a new template (a whole copy of it embedded at +0x28, owner country at +0x270)
@@ -17,7 +18,7 @@ The commands themselves (in command_record.tsv) say who acted; edits keep the te
   CSetObsoleteDivisionTemplateCommand  +0x28 template handle, +0x38 the flag (1 = decommission)
 A CReferencedDivisionTemplate (bridge.object 52 ID) has its name at +0x20, its battalion slots at +0x68 (pointer
 array, count +0x74; slot = column * 5 + row; an empty slot points at something that isn't a CSubUnitDefinition),
-support slots at +0x88, owner country id at +0x1ec, obsolete flag (byte) at +0x236.
+support slots at +0x88, regimental support at +0xa8 (one entry per column, same layout; verified live 2026-11-16), owner country id at +0x1ec, obsolete flag (byte) at +0x236.
 """
 import os
 import re
@@ -74,6 +75,10 @@ class TemplateLog:
         out = []
         for e in struct.unpack_from(f"<{n}Q", p.read(data, 8 * n) or b"\0" * 8 * n):
             out.append(self.reader.name_at(e, 0x18) if e and p.class_of(e) == "CSubUnitDefinition" else "")
+        if columns is None:             # one entry per column, empty ones kept (so each stays under its column)
+            while out and not out[-1]:
+                out.pop()
+            return ",".join(out)
         if not columns:
             return ",".join(s for s in out if s)
         cols = [",".join(s for s in out[c:c + ROWS] if s) for c in range(0, len(out), ROWS)]
@@ -92,13 +97,13 @@ class TemplateLog:
         return self.found
 
     def scan(self, full=True):
-        """{id: (owner tag, name, obsolete, battalions, support)}."""
+        """{id: (owner tag, name, obsolete, battalions, support, regimental support)}."""
         from hoi4ai.templates import _string
         out = {}
         for tid, a in self._addresses(full).items():
             flag = self.proc.read(a + 0x236, 1)
             out[tid] = (self.names.tag(self.proc.i32(a + 0x1ec)), _string(self.proc, a + 0x20),
-                        str(flag[0]) if flag else "", self._slots(a + 0x68, True), self._slots(a + 0x88, False))
+                        str(flag[0]) if flag else "", self._slots(a + 0x68, True), self._slots(a + 0x88, False), self._slots(a + 0xa8, None))
         return out
 
     def step(self, date, lines=()):

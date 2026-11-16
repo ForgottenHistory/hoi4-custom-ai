@@ -3,7 +3,8 @@
     I = Icons(loc.roots)          # game folder, then mods in load order
     I.unit("infantry")  -> {"uri": "data:image/png;base64,...", "group": "infantry"}  or None
 
-A unit key (common/units/*.txt) names a `sprite`; the sprite names GFX_unit_<sprite>_icon_medium in interface/*.gfx,
+The icon is GFX_unit_<unit key>_icon_medium in interface/*.gfx (the unit's `sprite` in common/units/*.txt is the fallback: support companies
+say `sprite = infantry` but have icons of their own),
 which names a two-frame .dds strip (the first frame is the icon). Later roots (mods) override earlier ones.
 Needs Pillow; without it, or for an icon it cannot find, the unit is None and the caller falls back to text.
 """
@@ -87,7 +88,7 @@ class Icons:
             return self.cache[key]
         res = None
         sprite, group = self.units.get(key, (key, ""))
-        tex = self.sprites.get(f"GFX_unit_{sprite}_icon_medium")
+        tex = self.sprites.get(f"GFX_unit_{key}_icon_medium") or self.sprites.get(f"GFX_unit_{sprite}_icon_medium")
         p = self._file(tex) if tex else None
         if p and Image:
             try:

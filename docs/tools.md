@@ -160,8 +160,8 @@ Hidden events run no command and are not recorded. `tools/events.py RECORD [OUT]
 Division templates (`hoi4ai/templaterec.py`): every country's templates go to `division_templates.tsv`, first all of
 them (`start`), then each one `new`, `changed` (an edit keeps the template's id) or `removed`: date, change, id,
 owner, name, obsolete (1 once decommissioned with the designer's button: the template stays, but can't be used for
-new divisions), battalions, support companies. Battalions are the designer's grid, columns separated by `|`, each top to
-bottom (`infantry,infantry,infantry|infantry,infantry,infantry|...`). The templates are read again whenever the record
+new divisions), battalions, support companies, regimental support. Battalions are the designer's grid, columns separated by `|`, each top to
+bottom (`infantry,infantry,infantry|infantry,infantry,infantry|...`). Regimental support is one entry per column (an empty column is an empty entry); recordings made before it was added lack that column. The templates are read again whenever the record
 holds a template command (create, edit in the designer, remove, set obsolete; those lines in `command_record.tsv` say
 who acted; the AI's too, most steps at speed 5) or a new template id turns up (checked each in-game day); these read
 the templates found before plus the ids past the highest. Every 7 days all templates are found again by id (about a
