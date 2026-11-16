@@ -569,10 +569,17 @@ What to remember about the rows:
 
 `tools/paradrops.py DIR [--tag GER]` lists the paradrop orders of a recording (`COrderSetParadropSourceCommand`:
 airbase province; `COrderSetParadropTargetCommand`: line id and target province) with the state of each province,
-decoded by `hoi4ai.planrec.decode`. An order is a plan, not a landing: whether a drop happened shows in
-`occupation.tsv` and `unit_snapshots.tsv`. The paratrooper divisions of an order come from a capture rule added on
-2026-11-16 (`planrec.RULES`, offsets guessed from the layout); check the first recording made with it before trusting
-that column. The meme_ger recording predates it, so its division column is empty.
+decoded by `hoi4ai.planrec.decode`. An order is a plan, not a landing: the drop happens when the army is executed (`execute` rows), days after the orders
+if the divisions still have to reach the airbase. Whether it landed shows in `unit_snapshots.tsv` (the division's
+province; the paratroopers' `ib0.c` column is the army id). A source order lists its paratrooper divisions as
+`4713:ID` since the capture rule of 2026-11-16 (`planrec.RULES`); recordings before it (meme_ger) have none, but their
+paratroopers are the divisions of the order's army with the template "Paratroopers" in the snapshots.
+
+Checked live on 2026-11-16 (`recordings/paradrop_test`, army 613, airbase Franche-Comte province 6698): the capture rule
+gave the dropping division of each source order (6176, 6161); the first drop (set 15 Sep, executed 28 Sep) put 6176 in
+Bern's province 9620, the second (set 28 Sep, executed 29-30 Sep) put 6161 in Eastern Swiss Alps province 11601, the
+division ids' provinces in the snapshots agreeing with the player's account. A line given two target orders
+(655: 11604, then 9620) ended at the last, which is an inference from one case.
 
 ## Checking the data
 
