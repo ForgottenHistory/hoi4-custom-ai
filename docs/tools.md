@@ -533,6 +533,29 @@ every 7 days as an animation, with enemy divisions in red. Between saves the lan
 The tool prints how far the replay is from that count. Encirclements and land a peace deal hands over without
 troops are guesses, so save more often for better land.
 
+## Reading the recordings
+
+Read a recording with `rows.py DIR FILE [col=value ...]` (`--schema` prints the file's columns and the format its
+recorder documents; `--count COLUMN` groups). It filters by column name, so a tag is never matched in the wrong
+column: in `diplomacy.tsv` a faction row is `country=HUN kind=faction partner=GER` (HUN is the member, GER the
+leader), and a grep for `GER` finds HUN joining the Axis as if Germany had. Look up what a column holds for each
+`kind` with `--schema` before reading a row.
+
+What to remember about the rows:
+- **Dates are when the row was read**, not when the thing happened: the logs read on a thread, a step takes longer than
+  a day at speed 5, and a country other than the player's is read weekly. Treat a date as "by this day".
+- **A reload repeats dates.** Loading an older save puts a `date=?` mark and then an earlier date in the record, and
+  everything from the load point appears twice (the abandoned timeline, then the replay); the `country/DAY.txt.gz`
+  files of the repeated days are overwritten. Find the repeats from the `#mark` lines in `command_record.tsv` going
+  back. `analyze_cmdrec.py` does not take them out: its day count and end date run late by the length of the
+  repeated stretch (a 14-day rewind showed the end as 4 September instead of 22 August).
+- **`start` rows** are the first read of a country, not something that began that day.
+- **`politics.tsv` focus `completed` rows arrive in batches** (45 on one day, 23 on another): do not use them for
+  when a focus finished. The `current` rows are on time.
+- **An empty state is not a zero**: a log that only writes on change (plans, equipment, spirits) is quiet for months.
+- **Counts that look like a cap** (experience at 500) are not checked against the game's rules: look in the game files.
+- `facilities.tsv` holds every country's facilities, projects and rewards, not only the player's.
+
 ## Checking the data
 
 ### `audit.py`
