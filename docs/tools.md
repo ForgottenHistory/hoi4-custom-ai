@@ -401,6 +401,8 @@ max experience +0x41), `CNavalMissionAddRegionCommand` (fleet `61:ID` +0x28, reg
 province +0x30), `CSetAsReserveFleetCommand`, `CLearnTraitCommand`, `CSetTaskForceAutoReinforcementCommand` (task
 forces +0x28), `CSetTaskForceCompositionRequirementsCommand` or `CDeleteUnitCommand` (`61:ID` +0x28). `--no-naval` turns it off.
 
+Research facilities (same module, same reads): `facilities.tsv` gets date, change (`start`, `new`, `changed`, `removed`), country, kind (`facility` or `project`), name (the building, e.g. `land_facility`, or the `sp_` special project), province, scientist (its id, empty when none), state (`id=N project=NAME dismantle=current/target`, plus `timed` while a dismantle runs, or `start=yes completed=no iterations=N` for projects shown once started; `kind=reward` rows are a project's history, each learning or choice taken: `option=… reward=… progress=… date=…`) and was. A dismantled facility ends as a `removed` row. Read from `program_status={ }` of the country block.
+
 Research (`hoi4ai/researchrec.py`): `research.tsv` gets each country's research slots at its first read and then each
 change: date, change (`start`, `new`, `changed`, `removed`, `done`), country, slot (1 the first), tech (empty: idle),
 level, design_team (MIO handle 79 id and name, e.g. `23 GER_mauser_organization`), points (research points so far, not

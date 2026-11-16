@@ -57,7 +57,7 @@ Navies (hoi4ai/navalrec.py): the task forces and admirals of the country each da
 country each week (ships, mission, regions, engagement, repair, home base, admiral; admirals' skills and traits), as
 they change, to naval.tsv and admirals.tsv.
 Research (hoi4ai/researchrec.py): the tech and design company in each research slot of the country each day and of
-every other producing country each week, and the techs finished, to research.tsv.
+every other producing country each week, and the techs finished, to research.tsv. Research facilities and special projects go to facilities.tsv.
 Analyse with analyze_cmdrec.py.
 """
 import argparse

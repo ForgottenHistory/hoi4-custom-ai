@@ -17,6 +17,18 @@ Read from a country's save-format block: technology={ technologies={ NAME={ leve
 id type=79 } } } slots={ NAME={ ... } | empty={ points } } }, the slots in order; MIO names from
 production={ industrial_organisations={ NAME={ id={ id type=79 } } } }.
 
+Also facilities.tsv (same reads), the research facilities and special projects of program_status={ }:
+  date  change  country  kind  name  province  scientist  state  was
+kind "facility" (name the building, e.g. land_facility; province its province; scientist
+the scientist id, empty when none; state "id=N project=NAME dismantle=current/target[ timed]", timed while a dismantle runs) or "project" (name the sp_ project,
+shown while started or completed; state "start=yes completed=no program=ID current_state=N iterations=N[ multiple_choice=NAME][ flags=..]": a multiple_choice
+is a choice waiting for an answer, gone once taken). change: start / new /
+removed / changed as above; kind "reward" is one entry of a project's history (name the project, province, scientist its character id,
+state "option=NAME reward=NAME progress=N date=D": a learning or a choice taken, once, as a new row). was: the compared fields (scientist, state without progress) as field=old.
+Read from program_status={ program={ id={ id type=83 } province scientist={ } delayed_dismantle_facility={ target
+current } building } project_pool={ project={ NAME={ progress={ prototype_state={ project_progress iterations } }
+start completed } } } }.
+
 The commands (in command_record.tsv; the owner column is "-" for every country, the country id is at +0x28):
   CSetResearchCommand     country id +0x28, technology (a CTechnologyTemplate*, name std::string at +0x10) +0x30,
                           slot +0x38 (0 the first), +0x3c 0x100 (0x10100 seen when switching back to a started tech)
@@ -29,6 +41,7 @@ from hoi4ai import shared
 from hoi4bridge import send
 
 FULL_DAYS = 7
+FHEADER = "date\tchange\tcountry\tkind\tname\tprovince\tscientist\tstate\twas"
 HEADER = "date\tchange\tcountry\tslot\ttech\tlevel\tdesign_team\tpoints\twas"
 FIELDS = ("tech", "level", "design_team", "points")
 COMPARE = ("tech", "design_team")
@@ -90,6 +103,62 @@ def research(text):
     return slots, done
 
 
+def _flat(s):
+    """S on one line, whitespace collapsed."""
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def facilities(text):
+    """{(kind, key): {field: value}} of the facilities and started or finished special projects of one country block."""
+    i = text.find("\n\t\tprogram_status={")
+    if i < 0:
+        return {}
+    out = {}
+    for name, b in _entries(_block(text, i + 1)):
+        if name == "program":
+            pid = re.search(r"id=\{ id=(\d+) type=83 \}", b)
+            pid = pid.group(1) if pid else str(len(out))
+            parts = dict(_entries(b))
+            sci = re.search(r"scientist=\{ id=(\d+) type=73 \}", parts.get("scientist", ""))
+            dis, una = parts.get("delayed_dismantle_facility", ""), parts.get("scientist", "")
+            una = re.search(r"delayed_unassigned_scientist=\{(.*?)\}", una, re.S)
+            una = una.group(1) if una else ""
+            out["facility", pid] = {
+                "name": _get(b, "building"), "province": _get(b, "province"),
+                "scientist": sci.group(1) if sci else "",
+                "state": f"id={pid} project={_get(b, 'project')} dismantle={_get(dis, 'current')}/{_get(dis, 'target')}"
+                         f"{' timed' if _get(dis, 'timed') == 'yes' else ''}"
+                         + (f" unassign={_get(una, 'current')}/{_get(una, 'target')}" if sci and _get(una, "timed") == "yes" else "")}
+        elif name == "project_pool":
+            for n, body in _entries(_block(b, 1)):
+                if _get(body, "start") == "yes" or _get(body, "completed") == "yes":
+                    parts = dict(_entries(body))
+                    ps = dict(_entries(parts.get("progress", ""))).get("prototype_state", "")
+                    extra = " ".join(f"{k}={_flat(parts[k])}" for k in ("variables", "flags") if _flat(parts.get(k, "")) not in ("", "{ }"))
+                    prog = re.search(r"id=(\d+)", parts.get("program", ""))
+                    hist = parts.get("history", "")
+                    k, pos = 0, 1
+                    while "{" in hist[pos:]:
+                        h = _block(hist, pos)
+                        pos = hist.find(h, pos) + len(h)
+                        k += 1
+                        ctx = dict(_entries(h)).get("context", "")
+                        char = re.search(r"character=\{ id=(\d+)", ctx)
+                        out["reward", f"{n}#{k}"] = {
+                            "name": n, "province": _get(ctx, "province"), "scientist": char.group(1) if char else "",
+                            "state": f"option={_get(h, 'option')} reward={_get(h, 'prototype_reward')} "
+                                     f"progress={_get(ctx, 'progress')} date={game_date(_get(h, 'date'))}"}
+                    out["project", n] = {
+                        "name": n, "province": "", "scientist": "", "progress": _get(ps, "project_progress"),
+                        "state": f"start={_get(body, 'start')} completed={_get(body, 'completed')} "
+                                 f"program={prog.group(1) if prog else ''} "
+                                 f"current_state={_get(parts.get('progress', ''), 'current_state')} "
+                                 f"iterations={_get(ps, 'iterations')}"
+                                 + (f" multiple_choice={_get(body, 'multiple_choice')}" if _get(body, "multiple_choice") else "")
+                                 + (" " + extra if extra else "")}
+    return out
+
+
 MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
           "November", "December")
 
@@ -127,12 +196,36 @@ class ResearchLog:
         if new:
             self.f.write(HEADER + "\n")
 
+        fpath = os.path.join(os.path.dirname(path), "facilities.tsv")
+        new = not os.path.exists(fpath)
+        self.ff = open(fpath, "a", encoding="utf-8")
+        if new:
+            self.ff.write(FHEADER + "\n")
+        self.fheld = {}             # tag -> {(kind, key): fields}
+
     def read(self, tag):
         r = shared.country(tag)
-        return research("\n".join(r)) if r and r[0].startswith("OK") else ({}, {})
+        text = "\n".join(r) if r and r[0].startswith("OK") else ""
+        return research(text) + (facilities(text),)
+
+    def _fdiff(self, tag, now):
+        last = self.fheld.get(tag)
+        rows = []
+        for key, v in sorted(now.items()):
+            old = None if last is None else last.get(key)
+            row = (tag, key[0], v["name"], v["province"], v["scientist"], v["state"])
+            if old is None:
+                rows.append(("start" if last is None else "new",) + row + ("",))
+            elif (old["scientist"], old["state"]) != (v["scientist"], v["state"]):
+                rows.append(("changed",) + row + (";".join(f"{f}={old[f]}" for f in ("scientist", "state") if old[f] != v[f]),))
+        if last is not None:
+            rows += [("removed", tag, k[0], v["name"], v["province"], v["scientist"], v["state"], "")
+                     for k, v in sorted(last.items()) if k not in now]
+        self.fheld[tag] = now
+        return rows
 
     def _diff(self, tag, now):
-        slots, done = now
+        slots, done = now[:2]
         last = self.held.get(tag)
         rows = []
         for k, v in sorted(slots.items()):
@@ -149,7 +242,7 @@ class ResearchLog:
                 was = last[1].get(n, ("",))[0]
                 if level != was:
                     rows.append(("done", tag, "", n, level, team, game_date(when), f"level={was}" if was else ""))
-        self.held[tag] = now
+        self.held[tag] = now[:2]
         return rows
 
     def step(self, date, lines=()):
@@ -163,14 +256,20 @@ class ResearchLog:
             todo += self.tags
             todo += list(self.others() or ()) if not self.started else shared.part(self.others(), self.days, FULL_DAYS)
         self.day = day
-        rows = []
+        rows, frows = [], []
         for tag in dict.fromkeys(todo):
-            rows += self._diff(tag, self.read(tag))
+            now = self.read(tag)
+            rows += self._diff(tag, now)
+            frows += self._fdiff(tag, now[2])
         self.started = True
         for row in rows:
             self.f.write("\t".join((date,) + row) + "\n")
+        for row in frows:
+            self.ff.write("\t".join((date,) + row) + "\n")
         self.f.flush()
-        return len(rows)
+        self.ff.flush()
+        return len(rows) + len(frows)
 
     def close(self):
         self.f.close()
+        self.ff.close()
