@@ -292,6 +292,7 @@ def build(rec):
     apm = load(os.path.join(rec, "apm.json"))
     reloads = load(os.path.join(rec, "reloads.json"))
     meta = ps["meta"]
+    LOC.ctx = {"tag": meta["player"], "focuses": {f["focus"] for f in ps["choices"]["focus"]}}   # for [GetXxx] scripted names
     d0, d1 = day(meta["start"]), day(meta["end"])
     eco = [(day(r["date"]), r) for r in ps["economy"] if day(r["date"])]
     wars = ps["wars"]

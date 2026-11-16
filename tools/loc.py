@@ -73,11 +73,48 @@ def mod_info(entry, user):
     return (p, rep) if os.path.isdir(p) else None
 
 
+def brace_blocks(text, name):
+    """Bodies of every `name = { ... }` block in TEXT (comments dropped), nested braces kept."""
+    text = re.sub(r"#[^\n]*", "", text)
+    out = []
+    for m in re.finditer(r"\b%s\s*=\s*\{" % name, text):
+        depth, i = 1, m.end()
+        while i < len(text) and depth:
+            depth += {"{": 1, "}": -1}.get(text[i], 0)
+            i += 1
+        out.append(text[m.end():i - 1])
+    return out
+
+
+def read_scripted(root, into):
+    """common/scripted_localisation: {name: [(trigger body, localization_key)]}; a later definition replaces."""
+    d = os.path.join(root, "common", "scripted_localisation")
+    if not os.path.isdir(d):
+        return
+    for n in sorted(os.listdir(d)):
+        if not n.endswith(".txt"):
+            continue
+        text = open(os.path.join(d, n), encoding="utf-8-sig", errors="replace").read()
+        for body in brace_blocks(text, "defined_text"):
+            nm = re.search(r"\bname\s*=\s*(\w+)", body)
+            if not nm:
+                continue
+            opts = []
+            for t in brace_blocks(body, "text"):
+                key = re.search(r"localization_key\s*=\s*([\w.\-']+)", t)
+                trig = brace_blocks(t, "trigger")
+                if key:
+                    opts.append((trig[0] if trig else "", key.group(1)))
+            into[nm.group(1)] = opts
+
+
 class Loc:
     def __init__(self, tables=None):
         self.t = tables or {}
         self.sources = []          # what was read, for the report's own caveat
         self.missing = []          # enabled mods that could not be read
+        self.scripted = {}         # scripted localisation: name -> [(trigger, key)]
+        self.ctx = {}              # what its triggers are checked against: tag, government, focuses (a set)
         self.roots = []            # game folder then each mod folder, in load order (for icons)
 
     @classmethod
@@ -104,11 +141,39 @@ class Loc:
             read_tree(path, self.t)
             self.sources.append(os.path.basename(path))
             self.roots.append(path)
+        for r in self.roots:
+            read_scripted(r, self.scripted)
         return self
 
+    def holds(self, trigger):
+        """Whether a scripted-localisation trigger holds for self.ctx. Only has_government, tag, original_tag and
+        has_completed_focus can be told from a recording; anything else counts as false. No trigger: true."""
+        c = self.ctx
+        conds = re.findall(r"(\w+)\s*=\s*([\w.\-]+)", trigger)
+        if not conds:
+            return not trigger.strip()
+        ok = {"has_government": lambda v: v == c.get("government"),
+              "tag": lambda v: v == c.get("tag"), "original_tag": lambda v: v == c.get("tag"),
+              "has_completed_focus": lambda v: v in c.get("focuses", ())}
+        return all(ok.get(k, lambda v: False)(v) for k, v in conds)
+
+    def scripted_text(self, name):
+        """The text of [name] for self.ctx: the first branch that holds, else the first branch, else None."""
+        opts = self.scripted.get(name)
+        if not opts:
+            return None
+        for trig, key in opts:
+            if self.holds(trig):
+                return self.get(key, 0)
+        return self.get(opts[0][1], 0)
+
     def clean(self, text):
-        text = re.sub(r"\$([\w.\-']+)(?:\|[^$]*)?\$", lambda m: self.get(m.group(1), 0) or "", text)
-        text = re.sub(r"§.|£\w+|\\n", lambda m: " " if m.group(0) == "\\n" else "", text)
+        for _ in range(3):                                   # $KEY$ references first (they may hold [GetXxx]), then scripted names
+            text = re.sub(r"\$([\w.\-']+)(?:\|[^$]*)?\$", lambda m: self.get(m.group(1), 0) or "", text)
+            text = re.sub(r"\[(\w+)\]", lambda m: self.scripted_text(m.group(1)) if m.group(1) in self.scripted else m.group(0), text)
+        text = re.sub(r"\[([A-Z]{3})\.Get(?:Name|NameDef|Adjective)\]", lambda m: self.get(m.group(1)) or m.group(1), text)
+        text = re.sub(r"\[[^\]]*\]", "", text)
+        text = re.sub(r"§.|£\w+|\n", lambda m: " " if m.group(0) == "\n" else "", text)
         return re.sub(r"\s+", " ", text).strip()
 
     def get(self, key, depth=1):
