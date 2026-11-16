@@ -378,7 +378,7 @@ def build(rec):
                 table(["year", "landed", "not landed"], [(y, by[(y, "yes")], by[(y, "no")]) for y in sorted({k[0] for k in by})]) +
                 "<h3>Landings per month</h3>" +
                 (chart([("landed", [(datetime.date(y, m, 15), per[(y, m)]) for y, m in tl])], d0, d1, wars, bars=True, height=150) if tl else "") +
-                "<h3>Most targeted states</h3>" + table(["state", "lines"], [(esc(s), n) for s, n in states.most_common(10)]))
+                "<h3>Most targeted states</h3>" + table(["state", "lines"], [(nm(s), n) for s, n in states.most_common(10)]))
         sec.append(("Paratroopers", body))
 
     # APM
