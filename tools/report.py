@@ -212,6 +212,44 @@ def month_dates(keys):
     return [datetime.date(int(k[:4]), int(k[5:7]), 15) for k in keys]
 
 
+EXTRA_CSS = {}                   # icon classes defined once, whatever the number of tiles
+
+
+def unit_tile(key, icons):
+    u = icons.unit(key)
+    label = esc(LOC(key))
+    cls = "u-" + re.sub(r"[^\w]", "_", key)
+    if u["uri"]:
+        EXTRA_CSS[cls] = f'.{cls}{{background-image:url({u["uri"]})}}'
+        return f'<i class="ut {cls}" title="{label}" role="img" aria-label="{label}"></i>'
+    return f'<i class="ut" title="{label}"><span>{label[:6]}</span></i>'
+
+
+def templates_html(templates, d1):
+    """One card per template, drawn like the in-game designer: support companies on top, then the battalion rows;
+    the brigade-type (combat support) unit of a row sits at the side of it. Each `|` group of the recording is a row."""
+    from icons import Icons
+    icons = Icons(LOC.roots)
+    seen, cards = set(), []
+    for t in templates:
+        if t["change"] != "new":
+            continue
+        rows = [r.split(",") for r in (t["battalions"] or "").split("|") if r]
+        sup = [x for x in (t["support"] or "").split(",") if x]
+        body = ""
+        if sup:
+            body += '<div class="trow sup">' + "".join(unit_tile(k, icons) for k in sup) + "</div>"
+        for r in rows:
+            main = [k for k in r if icons.unit(k)["group"] != "combat_support"]
+            side = [k for k in r if icons.unit(k)["group"] == "combat_support"]
+            body += ('<div class="trow">' + "".join(unit_tile(k, icons) for k in main) +
+                     (f'<b class="side">{"".join(unit_tile(k, icons) for k in side)}</b>' if side else "") + "</div>")
+        n = sum(len(r) for r in rows)
+        cards.append(f'<div class="tpl"><h4>{esc(t["name"])}</h4><small>{esc(t["date"][:10])} · {n} battalions'
+                     f'{f", {len(sup)} support" if sup else ""}</small>{body}</div>')
+    return f'<p class="lead">{len(cards)} templates you made. Support companies on top, battalions in rows below, brigade support at the side of its row. Hover an icon for its name.</p><div class="tpls">{"".join(cards)}</div>'
+
+
 def build(rec):
     global LOC
     LOC = Loc.for_recording(rec)
@@ -288,8 +326,7 @@ def build(rec):
     sec.append(("Research, events and decisions per year",
                 table(["year", "techs started", "event choices", "decisions"], [(y, yr[y], ev[y], dc[y]) for y in years]) +
                 "<h3>Techs in order</h3><p class='small'>" + ", ".join(nm(r["tech"]) for r in ch["research"]) + "</p>"))
-    sec.append(("Division templates", more("All templates", table(["date", "name", "battalions", "support"], [
-        (esc(t["date"][:10]), esc(t["name"]), esc(t["battalions"] or ""), esc(t["support"] or "")) for t in ch["templates"] if t["change"] == "new"]))))
+    sec.append(("Division templates", templates_html(ch["templates"], d1)))
 
     # paradrops
     pd_path = os.path.join(rec, "paradrops.tsv")
@@ -381,6 +418,14 @@ tr:last-child td{border-bottom:0}th{color:var(--ink2);font-weight:600;font-size:
 details{margin:10px 0}summary{cursor:pointer;color:var(--accent);font-size:13px;font-weight:600;padding:4px 0}
 summary:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 .small{font-size:12px;color:var(--ink2)}ul{padding-left:20px;color:var(--ink2);max-width:72ch}li{margin:4px 0}
+/* templates */
+.tpls{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.tpl{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;min-width:0}
+.tpl h4{font:600 14px/1.25 var(--display);margin:0;overflow-wrap:anywhere}.tpl small{display:block;color:var(--ink2);font-size:12px;margin:2px 0 10px}
+.trow{display:flex;gap:4px;margin-top:4px;align-items:center}.trow.sup{padding-bottom:8px;margin-bottom:4px;border-bottom:1px dashed var(--line)}
+.ut{width:38px;height:30px;flex:none;background:#e4e6ea;border:1px solid #b9bdc6;border-radius:3px;display:flex;align-items:center;justify-content:center;font-style:normal}
+.ut{background-repeat:no-repeat;background-position:center;background-size:contain;background-origin:content-box;padding:3px}.ut span{font-size:9px;color:#333}
+.side{margin-left:auto;padding-left:8px;border-left:1px solid var(--line);display:flex;gap:4px}
 footer{padding-block:48px;color:var(--ink2);font-size:12px}
 @media (max-width:520px){h2{font-size:21px}.stat b{font-size:19px}}
 """
@@ -431,7 +476,7 @@ def main():
             f"<title>{esc(title)}</title>"
             '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
             '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@600;700&display=swap">'
-            f"<style>{CSS}</style></head><body>"
+            f"<style>{CSS}{''.join(EXTRA_CSS.values())}</style></head><body>"
             f'<header class="top"><div class="wrap"><p class="kicker">{esc(meta["start"][:10])} to {esc(meta["end"][:10])}</p>'
             f'<h1>{esc(title)}</h1><p class="sub">{esc(rec_name)}: what happened and what you did, read from the recording\'s own files. '
             f'Hover a chart for the values.</p>{sec[0][1]}</div></header>'

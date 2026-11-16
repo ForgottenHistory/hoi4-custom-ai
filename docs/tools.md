@@ -474,7 +474,7 @@ occupation and resistance, navy, air force, generals and admirals, trade and int
 `report_sections.py`, replayed from the recorders' logs), and a list of what the data cannot say. Every figure is read from those files, none is written by hand. Overlapping wars are
 drawn as one shaded band.
 
-Names: ids are shown as the game shows them (focuses, techs, laws, advisors, countries, equipment, traits). `tools/loc.py` reads the base game's `localisation/english` and then every mod in the recording's `dlc_load.json`, in load order (a mod with `replace_path = "localisation"` discards what came before). Set `HOI4_DIR` and `HOI4_USER_DIR` when the game or Documents folder is not in the default place. An id with no entry stays as the id; zipped (`archive=`) mods are not read.
+Names: ids are shown as the game shows them (focuses, techs, laws, advisors, countries, equipment, traits). `tools/loc.py` reads the base game's `localisation/english` and then every mod in the recording's `dlc_load.json`, in load order (a mod with `replace_path = "localisation"` discards what came before). Set `HOI4_DIR` and `HOI4_USER_DIR` when the game or Documents folder is not in the default place. Division templates are drawn with the in-game unit icons (`tools/icons.py`, needs Pillow): unit key -> `sprite` in `common/units` -> `GFX_unit_<sprite>_icon_medium` in `interface/*.gfx` -> the first frame of the .dds, inlined once per icon. An id with no entry stays as the id; zipped (`archive=`) mods are not read.
 
 ### `playstyle.py`
 

@@ -78,6 +78,7 @@ class Loc:
         self.t = tables or {}
         self.sources = []          # what was read, for the report's own caveat
         self.missing = []          # enabled mods that could not be read
+        self.roots = []            # game folder then each mod folder, in load order (for icons)
 
     @classmethod
     def for_recording(cls, rec, mods=None):
@@ -86,6 +87,7 @@ class Loc:
         if game:
             read_tree(game, self.t)
             self.sources.append("base game")
+            self.roots.append(game)
         if mods is None:
             try:
                 mods = json.load(open(os.path.join(rec, "dlc_load.json"), encoding="utf-8")).get("enabled_mods", [])
@@ -101,6 +103,7 @@ class Loc:
                 self.t.clear()
             read_tree(path, self.t)
             self.sources.append(os.path.basename(path))
+            self.roots.append(path)
         return self
 
     def clean(self, text):
