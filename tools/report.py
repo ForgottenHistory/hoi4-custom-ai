@@ -81,11 +81,12 @@ def fold(series, keep=8):
     return head + [("Other", other)]
 
 
-def chart(series, d0, d1, wars=(), stacked=False, height=210, ymax=None, bars=False, pct=False):
+def chart(series, d0, d1, wars=(), stacked=False, height=210, ymax=None, bars=False, pct=False, colors=None):
     """SVG line/area/bar chart with a hover readout. SERIES [(name, [(date, value)])]; dates are datetime.date.
     Colours are the .s1-.s8 classes of the page CSS (fixed order, light and dark); the data of each series is also
     written into data-chart so the page script can show the values under the pointer."""
     series = fold(series)
+    pick = lambda i: (colors[i] if colors and i < len(colors) else i % 8 + 1)
     W, H, L, R, T, B = 760, height, 44, 12, 12, 26
     n = max(len(s[1]) for s in series)
     top = ymax or nice(max((sum(s[1][i][1] for s in series if i < len(s[1])) for i in range(n)) if stacked
@@ -115,7 +116,7 @@ def chart(series, d0, d1, wars=(), stacked=False, height=210, ymax=None, bars=Fa
                  f'<title>at war from {a} to {b}: {esc(", ".join(es[:8]))}{"..." if len(es) > 8 else ""}</title></rect>')
     base = [0.0] * n
     for i, (name, pts) in enumerate(series):
-        c = f"s{i % 8 + 1}"
+        c = f"s{pick(i)}"
         if bars:
             bw = max(1.5, (W - L - R) / max(len(pts), 1) * 0.78)
             for j, (d, v) in enumerate(pts):
@@ -135,9 +136,9 @@ def chart(series, d0, d1, wars=(), stacked=False, height=210, ymax=None, bars=Fa
             if pts:
                 o.append(f'<circle cx="{x(pts[-1][0].toordinal()):.1f}" cy="{y(pts[-1][1]):.1f}" r="3.2" class="f {c} dot"/>')
     o.append(f'<line class="cross" x1="0" x2="0" y1="{T}" y2="{H - B}"/></svg>')
-    data = json.dumps({"x0": x.lo, "x1": x.hi, "L": L, "R": W - R, "W": W, "stacked": stacked, "pct": pct,
+    data = json.dumps({"x0": x.lo, "x1": x.hi, "L": L, "R": W - R, "W": W, "stacked": stacked, "pct": pct, "c": [pick(i) for i in range(len(series))],
                        "s": [[nm, [[d.toordinal(), round(v, 3)] for d, v in pts]] for nm, pts in series]}, separators=(",", ":"))
-    leg = "".join(f'<span><i class="f s{i % 8 + 1}"></i>{esc(nm)}</span>' for i, (nm, _) in enumerate(series)) if len(series) > 1 else ""
+    leg = "".join(f'<span><i class="f s{pick(i)}"></i>{esc(nm)}</span>' for i, (nm, _) in enumerate(series)) if len(series) > 1 else ""
     cap = f'<figcaption class="legend">{leg}</figcaption>' if leg else ""
     return f'<figure class="fig" data-chart="{html.escape(data)}">{"".join(o)}<div class="tip" hidden></div>{cap}</figure>'
 
@@ -223,7 +224,7 @@ def build(rec):
     sec.append(("Summary", '<div class="stats">' + "".join(stats) + "</div>"))
 
     sec.append(("Economy", f'<p class="lead">Factories grew from {first["civ"] + first["mil"] + first["naval"]:g} to {last["civ"] + last["mil"] + last["naval"]:g}, divisions from {first["divisions"]:g} to {last["divisions"]:g}. Shaded bands are wars (hover for who). Source: country.tsv, one row per read.</p>'
-                "<h3>Factories</h3>" + chart([("civilian", ser("civ")), ("military", ser("mil")), ("naval", ser("naval"))], d0, d1, wars, stacked=True) +
+                "<h3>Factories</h3>" + chart([("civilian", ser("civ")), ("military", ser("mil")), ("naval", ser("naval"))], d0, d1, wars, stacked=True, colors=[2, 6, 1]) +
                 "<h3>Divisions and controlled states</h3>" + chart([("divisions", ser("divisions")), ("states", ser("states"))], d0, d1, wars) +
                 "<h3>Manpower</h3>" + chart([("manpower", ser("manpower"))], d0, d1, wars, height=160) +
                 "<h3>Stability and war support (%)</h3>" + chart([("stability", ser("stability", 100)), ("war support", ser("war_support", 100))], d0, d1, wars, height=160, ymax=100, pct=True)))
@@ -380,7 +381,7 @@ document.querySelectorAll('.fig[data-chart]').forEach(function(f){
     tip.textContent='';
     var h=document.createElement('b');h.textContent=new Date((ord-719163)*864e5).toISOString().slice(0,10);tip.appendChild(h);
     rows.forEach(function(q){var d=document.createElement('div'),i=document.createElement('i'),n=document.createElement('span'),v=document.createElement('em');
-      i.className='f s'+(q[2]%8+1);n.textContent=q[0];v.textContent=fmtv(q[1],D.pct);d.append(i,n,v);tip.appendChild(d)});
+      i.className='f s'+(D.c[q[2]]);n.textContent=q[0];v.textContent=fmtv(q[1],D.pct);d.append(i,n,v);tip.appendChild(d)});
     tip.hidden=false;var fr=f.getBoundingClientRect(),x=e.clientX-fr.left+14;
     if(x+tip.offsetWidth>fr.width-6)x=e.clientX-fr.left-tip.offsetWidth-14;
     tip.style.left=Math.max(6,x)+'px';
