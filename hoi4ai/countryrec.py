@@ -25,12 +25,13 @@ VARIABLES = ["political_power", "command_power", "manpower", "num_of_factories",
              "num_of_available_military_factories", "num_divisions", "fuel_k", "max_fuel_k", "army_experience",
              "navy_experience", "air_experience", "num_of_controlled_states"]
 BLOCK_NUMBERS = ["stability", "war_support"]   # top-level lines of the block (the game variables read 0 for these)
+BLOCK_TEXT = ["ruling_party"]                  # the government (its ideology group), from politics={ } of the block
 INTEL = ["civilian", "army", "navy", "air"]
 
 
 def numbers(tag, block):
     """{name: value text} for VARIABLES and BLOCK_NUMBERS."""
-    out = dict.fromkeys(VARIABLES + BLOCK_NUMBERS, "")
+    out = dict.fromkeys(VARIABLES + BLOCK_NUMBERS + BLOCK_TEXT, "")
     lines = query(f'{tag} = {{ log = "' + "|".join(f"{v}=[?{v}]" for v in VARIABLES) + '" }')
     for part in (lines[0] if lines else "").strip().split("|"):
         k, _, v = part.partition("=")
@@ -39,6 +40,8 @@ def numbers(tag, block):
     for k in BLOCK_NUMBERS:
         m = re.search(rf"^\t\t{k}=(\S+)", block, re.M)
         out[k] = m.group(1) if m else ""
+    m = re.search(r"^\t\t\truling_party=(\w+)", block, re.M)
+    out["ruling_party"] = m.group(1) if m else ""
     return out
 
 
@@ -78,7 +81,9 @@ class CountryLog:
         os.makedirs(os.path.join(folder, "country"), exist_ok=True)
         self.proc = Process()
         self.reader = Reader(self.proc)
-        self.f_num = self._open("country.tsv", "date\t" + "\t".join(VARIABLES + BLOCK_NUMBERS))
+        self.f_num = self._open("country.tsv", "date\t" + "\t".join(VARIABLES + BLOCK_NUMBERS + BLOCK_TEXT))
+        with open(os.path.join(folder, "country.tsv"), encoding="utf-8") as h:     # a file begun before a column existed keeps its columns
+            self.cols = h.readline().rstrip("\n").split("\t")[1:]
         self.f_eq = self._open("equipment.tsv", "id\tname\ttype\tmodules")
         self.f_intel = self._open("intel.tsv", "date\ttarget\t" + "\t".join(INTEL))
         self.equipment = set()
@@ -89,6 +94,7 @@ class CountryLog:
         f = open(path, "a", encoding="utf-8")
         if new:
             f.write(header + "\n")
+            f.flush()
         return f
 
     def step(self, day):
@@ -100,7 +106,7 @@ class CountryLog:
         with gzip.open(os.path.join(self.folder, "country", f"{day}.txt.gz"), "wt", encoding="utf-8") as g:
             g.write(block)
         n = numbers(self.tag, block)
-        self.f_num.write(day + "\t" + "\t".join(n[k] for k in VARIABLES + BLOCK_NUMBERS) + "\n")
+        self.f_num.write(day + "\t" + "\t".join(n[k] for k in self.cols) + "\n")
         for row in intel(self.tag):
             self.f_intel.write(day + "\t" + "\t".join(row) + "\n")
         new = [i for i in handles(block, 70) if i not in self.equipment]

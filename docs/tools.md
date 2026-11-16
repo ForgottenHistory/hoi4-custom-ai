@@ -143,7 +143,7 @@ layouts and `decode()` for each battle-plan command. `--no-plans` turns it off.
 
 Country state (`hoi4ai/countryrec.py`): each in-game day the country's whole save-format block (`bridge.country`:
 production lines, stockpile, research, politics, focus, training queue, divisions) goes to `country/DAY.txt.gz`,
-headline numbers (political power, manpower, factories, fuel, experience, stability, war support) to `country.tsv`,
+headline numbers (political power, manpower, factories, fuel, experience, stability, war support, the ruling party's ideology group `ruling_party` = the government) to `country.tsv`,
 and the equipment variants the block names by id to `equipment.tsv` (the template ids are in
 `division_templates.tsv`). `intel.tsv` holds the country's intel (civilian, army, navy, air, 0-100) over every
 other country each day: the player's fog of war, since what the map shows of a country's army follows army intel
@@ -461,6 +461,10 @@ and advisors (`CAddIdeaCommand`, `CReplaceIdeaCommand`) and trade deals. These c
 tags `events.tsv` gives the same events. Each row takes the earliest unused matching command of the player
 between the log's previous read (less a day) and the row. A row with its command is never `auto`; the commands
 themselves are not separate examples.
+
+### `government.py`
+
+`tools/government.py REC` prints the player's government over a recording, where it changed. It reads the `ruling_party` column of `country.tsv`; a recording from before that column is read from the daily `country/*.txt.gz` dumps once and cached in `government.tsv`. `report.py` uses it to pick the branch of scripted names that depend on the government.
 
 ### `report.py`
 

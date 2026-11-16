@@ -24,6 +24,7 @@ from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from loc import Loc
+import government
 
 sys.modules.setdefault("report", sys.modules[__name__])      # report_sections imports this module: share one LOC when run as a script
 
@@ -283,6 +284,12 @@ def templates_html(rec, tag):
             f' Hover an icon for its name. {"" if has_reg else ("Regimental support is as the game had it when regiment_now.tsv was taken, not as it was edited." if now else "This recording predates the regimental support column, so that row is not shown.")}</p><div class="tpls">{"".join(cards)}</div>')
 
 
+def focus_name(f, gov):
+    """A focus's name as the government of the day would see it (scripted names differ by government)."""
+    LOC.ctx["government"] = government.at(gov, f["date"][:10])
+    return nm(f["focus"])
+
+
 def build(rec):
     global LOC
     LOC = Loc.for_recording(rec)
@@ -292,7 +299,9 @@ def build(rec):
     apm = load(os.path.join(rec, "apm.json"))
     reloads = load(os.path.join(rec, "reloads.json"))
     meta = ps["meta"]
-    LOC.ctx = {"tag": meta["player"], "focuses": {f["focus"] for f in ps["choices"]["focus"]}}   # for [GetXxx] scripted names
+    LOC.ctx = {"tag": meta["player"], "focuses": {f["focus"] for f in ps["choices"]["focus"]}}
+    gov = government.history(rec)
+    LOC.ctx["government"] = government.at(gov, meta["end"][:10])   # for [GetXxx] scripted names
     d0, d1 = day(meta["start"]), day(meta["end"])
     eco = [(day(r["date"]), r) for r in ps["economy"] if day(r["date"])]
     wars = ps["wars"]
@@ -349,7 +358,7 @@ def build(rec):
     # choices
     ch = ps["choices"]
     foc = ch["focus"]
-    sec.append(("National focus", more(f"All {len(foc)} focuses", table(["picked", "focus", "finished"], [(esc(f["date"][:10]), nm(f["focus"]), esc((f.get("finished") or "")[:10])) for f in foc]))))
+    sec.append(("National focus", more(f"All {len(foc)} focuses", table(["picked", "focus", "finished"], [(esc(f["date"][:10]), focus_name(f, gov), esc((f.get("finished") or "")[:10])) for f in foc]))))
     laws = [l for l in ch["laws"] if l["kind"] != "advisor"]
     adv = [l for l in ch["laws"] if l["kind"] == "advisor"]
     sec.append(("Laws and advisors", table(["date", "kind", "slot", "value", "was"], [(esc(l["date"][:10]), esc(l["kind"]), esc(l["slot"].replace("_", " ")), nm(l["value"]), nm(l["was"]) if l.get("was") else "") for l in laws + adv])))
