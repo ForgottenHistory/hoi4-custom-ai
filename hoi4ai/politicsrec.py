@@ -41,7 +41,21 @@ COUNTRY_AT_28 = ("CSetNationalFocusCommand", "CDropCurrentNationalFocusCommand",
                  "CReplaceIdeaCommand")
 ADVISORS = ("CAddAdvisorCommand", "CRemoveAdvisorCommand")
 _IDEAS = re.compile(r"\n\t*ideas=\{([^}]*)\}")
-_FOCUS = re.compile(r"\n\t*focus=\{([^}]*)\}")
+_FOCUS = re.compile(r"\n\t*focus=\{")
+
+
+def focus_body(text):
+    """The inside of the country's `focus={ ... }` block, or None. Braces are matched, not the first `}`: while a
+    focus is highlighted in the UI the block holds a nested `activate_shine_on_focus={ ... }`, and stopping at its `}`
+    loses every `completed=` and the `current=` (it showed as the whole list removed, then added back in a batch)."""
+    m = _FOCUS.search(text)
+    if not m:
+        return None
+    depth, i = 1, m.end()
+    while i < len(text) and depth:
+        depth += {"{": 1, "}": -1}.get(text[i], 0)
+        i += 1
+    return text[m.end():i - 1]
 _ADVISORS = re.compile(r"\n\t*appointed_advisors=\{(.*?)\n\t*\}", re.S)
 _APPOINTED = re.compile(r'slot="([^"]+)"\s*character=\{\s*id=(\d+)')
 
@@ -127,9 +141,8 @@ class PoliticsLog:
             return None
         text = "\n".join(r)
         out = {}
-        m = _FOCUS.search(text)
-        if m:
-            body = m.group(1)
+        body = focus_body(text)
+        if body is not None:
             for f in re.findall(r'completed="([^"]*)"', body):
                 out[("focus", "completed", f)] = f
             c = re.search(r'current="([^"]*)"', body)

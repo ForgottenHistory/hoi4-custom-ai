@@ -546,12 +546,15 @@ What to remember about the rows:
   a day at speed 5, and a country other than the player's is read weekly. Treat a date as "by this day".
 - **A reload repeats dates.** Loading an older save puts a `date=?` mark and then an earlier date in the record, and
   everything from the load point appears twice (the abandoned timeline, then the replay); the `country/DAY.txt.gz`
-  files of the repeated days are overwritten. Find the repeats from the `#mark` lines in `command_record.tsv` going
-  back. `analyze_cmdrec.py` does not take them out: its day count and end date run late by the length of the
-  repeated stretch (a 14-day rewind showed the end as 4 September instead of 22 August).
+  files of the repeated days are overwritten. The record's clock (`hoi4ai/clock.py`) follows a mark more than 72 hours
+  back, so command dates after the load are the replay's; before that fix every date after a reload ran ahead by the
+  length of the rewind (a 14-day rewind put the end at 4 September instead of 22 August). Find the repeats from the
+  `#mark` lines in `command_record.tsv` going back.
 - **`start` rows** are the first read of a country, not something that began that day.
-- **`politics.tsv` focus `completed` rows arrive in batches** (45 on one day, 23 on another): do not use them for
-  when a focus finished. The `current` rows are on time.
+- **`politics.tsv` recorded before `focus_body` (hoi4ai/politicsrec.py) lost the focus whenever a focus was
+  highlighted in the UI** (the block gets a nested `activate_shine_on_focus={}` and the old pattern stopped at its
+  `}`): every completed focus showed `removed`, then all `new` again in a batch (9 on 20 November 1936, back on
+  9 April 1937). The vanilla_ger_1936 recording has this; rebuild a focus timeline from `country/DAY.txt.gz` instead.
 - **An empty state is not a zero**: a log that only writes on change (plans, equipment, spirits) is quiet for months.
 - **Counts that look like a cap** (experience at 500) are not checked against the game's rules: look in the game files.
 - `facilities.tsv` holds every country's facilities, projects and rewards, not only the player's.

@@ -3,7 +3,9 @@
 The game runs one CHourlyTickCommand per in-game hour, and the record holds every one, so counting them dates each
 command exactly; the "#mark date=" lines (cmdrec, battlerec, the controller) anchor the count. A mark's date is read
 before the mark is written, so it can be late by some ticks when the recorder is busy (seen: mostly 1, up to 32 at
-speed 5), never early: the anchor is the latest (mark date - ticks before it).
+speed 5), never early: the anchor is the latest (mark date - ticks before it). A mark more than REWIND hours behind
+that anchor is a reload of an older save (the game was put back; a late mark is never that far behind): the clock
+follows it, so the dates after the load are the replay's, not the abandoned timeline's.
 
     clock = Clock()
     for line in record:
@@ -20,6 +22,7 @@ MONTHS = ("January", "February", "March", "April", "May", "June", "July", "Augus
 _GAME = re.compile(r"(\d+):(\d+), (\d+) (\w+), (\d+)")
 _ISO = re.compile(r"(\d+)-(\d+)-(\d+) (\d+):(\d+)")
 HOUR = datetime.timedelta(hours=1)
+REWIND = 72 * HOUR
 
 
 def parse(text):
@@ -54,7 +57,7 @@ class Clock:
                 d, style = parse(p[2][5:].strip())
                 if d is not None:
                     base = d - self.ticks * HOUR
-                    if self.base is None or base > self.base or style != self.style:
+                    if self.base is None or base > self.base or style != self.style or base < self.base - REWIND:
                         self.base, self.style = base, style
                     self._set()
         elif "\tCHourlyTickCommand\t" in line:
