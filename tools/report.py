@@ -265,15 +265,15 @@ def templates_html(rec, tag):
         cells = ""
         for c in range(ncol):
             col = cols[c] if c < len(cols) else []
-            cells += '<div class="tcol">' + "".join(unit_tile(k, icons) for k in col) +                      "".join('<i class="ut empty">+</i>' for _ in range(nrow - len(col))) + "</div>"
+            cells += '<div class="tcol">' + "".join(unit_tile(k, icons) for k in col) +                      "".join('<i class="ut empty"></i>' for _ in range(nrow - len(col))) + "</div>"
         raw = r[ix["regiment"]] if has_reg and len(r) > ix["regiment"] else now.get(tid)
         reg = raw.split(",") if raw is not None else None
         rrow = ""
         if reg is not None:
             rrow = ('<div class="treg"><b>Regimental support</b><div class="tgrid">' +
-                    "".join(unit_tile(reg[c], icons) if c < len(reg) and reg[c] else '<i class="ut empty">+</i>' for c in range(ncol)) +
+                    "".join(unit_tile(reg[c], icons) if c < len(reg) and reg[c] else '<i class="ut empty"></i>' for c in range(ncol)) +
                     '</div></div>')
-        scol = "".join(unit_tile(k, icons) for k in sup) + '<i class="ut empty">+</i>'
+        scol = "".join(unit_tile(k, icons) for k in sup) + '<i class="ut empty"></i>'
         cards.append(f'<div class="tpl"><h4>{esc(r[ix["name"]])}</h4>'
                      f'<small>{n} battalions{f", {len(sup)} support" if sup else ""} · {d.isoformat() if d else ""}'
                      f'{f" · edited {edits[tid]}×" if edits[tid] else ""}</small>'
