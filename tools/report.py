@@ -253,13 +253,19 @@ def templates_html(rec, tag):
         d = day(first[tid])
         n = sum(len(c) for c in cols)
         meta = f'{n} battalions' + (f', {len(sup)} support' if sup else "")
-        grid = "".join('<div class="tcol">' + "".join(unit_tile(k, icons) for k in c) + "</div>" for c in cols)
-        cards.append(f'<div class="tpl"><h4>{esc(r[ix["name"]])}</h4><small>{meta}</small>'
-                     + (f'<div class="tsup">{"".join(unit_tile(k, icons) for k in sup)}</div>' if sup else "")
-                     + f'<div class="tgrid">{grid}</div>'
-                     + f'<small class="when">{d.isoformat() if d else ""}{f" · edited {edits[tid]}×" if edits[tid] else ""}</small></div>')
-    return (f'<p class="lead">{len(cards)} templates of {esc(tag)}, as they ended. Support companies on top, then the battalion columns '
-            f'(each column runs top to bottom). Hover an icon for its name.</p><div class="tpls">{"".join(cards)}</div>')
+        ncol, nrow = min(5, max(len(cols) + 1, 2)), min(5, max((len(c) for c in cols), default=0) + 1)
+        cells = ""
+        for c in range(ncol):
+            col = cols[c] if c < len(cols) else []
+            cells += '<div class="tcol">' + "".join(unit_tile(k, icons) for k in col) +                      "".join('<i class="ut empty">+</i>' for _ in range(nrow - len(col))) + "</div>"
+        scol = "".join(unit_tile(k, icons) for k in sup) + '<i class="ut empty">+</i>'
+        cards.append(f'<div class="tpl"><h4>{esc(r[ix["name"]])}</h4>'
+                     f'<small>{n} battalions{f", {len(sup)} support" if sup else ""} · {d.isoformat() if d else ""}'
+                     f'{f" · edited {edits[tid]}×" if edits[tid] else ""}</small>'
+                     f'<div class="tdes"><div class="tgrid">{cells}</div>'
+                     f'<div class="tsup"><b>Support</b><div class="tsl" style="--rows:{min(5, len(sup) + 1)}">{scol}</div></div></div></div>')
+    return (f'<p class="lead">{len(cards)} templates of {esc(tag)}, as they ended. Laid out like the division designer: battalion columns on the left, support companies on the right.'
+            f' Hover an icon for its name. Regimental support is not in the recording.</p><div class="tpls">{"".join(cards)}</div>')
 
 
 def build(rec):
@@ -432,17 +438,17 @@ tr:last-child td{border-bottom:0}th{color:var(--ink2);font-weight:600;font-size:
 details{margin:10px 0}summary{cursor:pointer;color:var(--accent);font-size:13px;font-weight:600;padding:4px 0}
 summary:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 .small{font-size:12px;color:var(--ink2)}ul{padding-left:20px;color:var(--ink2);max-width:72ch}li{margin:4px 0}
-/* templates */
-.tpls{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start}
-.tpl{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px 10px;min-width:150px;max-width:100%}
-.tpl h4{font:600 14px/1.25 var(--display);margin:0}.tpl small{display:block;color:var(--ink2);font-size:12px}
-.tpl small.when{margin-top:10px;font-size:11px}
-.tsup{display:flex;flex-wrap:wrap;gap:4px;margin:10px 0 8px;padding-bottom:8px;border-bottom:1px dashed var(--line);max-width:260px}
-.tgrid{display:flex;gap:4px;margin-top:8px;overflow-x:auto}.tsup+.tgrid{margin-top:0}
-.tcol{display:flex;flex-direction:column;gap:4px}
-.ut{width:38px;height:30px;flex:none;border:1px solid #b9bdc6;border-radius:3px;display:block;font-style:normal;text-align:center;line-height:28px;background-color:#e4e6ea;
-  background-repeat:no-repeat;background-position:center;background-size:contain;background-origin:content-box;padding:3px}
-.ut span{font-size:9px;color:#333}
+/* templates: the in-game designer, dark panel */
+.tpls{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start}
+.tpl{background:#1d1f1b;border:1px solid #3a3d34;border-radius:6px;padding:12px 14px 14px;max-width:100%;color:#ece9df;box-shadow:0 1px 0 rgba(255,255,255,.04) inset}
+.tpl h4{font:600 15px/1.25 var(--display);margin:0;letter-spacing:.02em}.tpl small{display:block;color:#a9a79c;font-size:11px;margin:2px 0 12px}
+.tdes{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.tgrid{display:flex;gap:7px}.tcol{display:flex;flex-direction:column;gap:7px}
+.tsup{border-left:1px solid #3a3d34;padding-left:14px}.tsup b{display:block;font:600 11px/1 var(--body);letter-spacing:.06em;text-transform:uppercase;color:#a9a79c;margin-bottom:9px}
+.tsl{display:grid;grid-auto-flow:column;grid-template-rows:repeat(var(--rows),auto);gap:7px}
+.ut{width:46px;height:36px;flex:none;border:1px solid #4a4d43;border-radius:3px;display:block;font-style:normal;text-align:center;line-height:34px;
+  background-color:#2b2d27;background-repeat:no-repeat;background-position:center;background-size:contain;background-origin:content-box;padding:4px}
+.ut span{font-size:9px;color:#ccc}.ut.empty{background:#22241f;border-color:#34372f;color:#6c6e63;font-size:18px;line-height:32px}
 footer{padding-block:48px;color:var(--ink2);font-size:12px}
 @media (max-width:520px){h2{font-size:21px}.stat b{font-size:19px}}
 """
