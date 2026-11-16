@@ -57,7 +57,10 @@ def main():
     ap.add_argument("--out")
     ap.add_argument("--no-open", action="store_true")
     a = ap.parse_args()
-    load = os.path.join(a.dir, "dlc_load.json")
+    load = os.path.join(a.dir, "dlc_load.json")      # read from the recording; everything written goes inside this project
+    a.dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "recordings",
+                         os.path.basename(os.path.normpath(a.dir)))
+    os.makedirs(a.dir, exist_ok=True)
     files = GameFiles(load=load if os.path.exists(load) else None)
     m = mapdata.load(files)
     ids = mapdata.province_image(m)

@@ -1,6 +1,6 @@
 """Who owns, controls and has a core on every state, and who controls every province, as the running game has it now.
 
-    python tools/state_snapshot.py RECORDING_DIR
+    python tools/state_snapshot.py RECORDING_DIR     (writes into hoi4-custom-ai/recordings/<name>)
 
 For a recording made before states.tsv and control.tsv existed (hoi4ai/countryrec.py): writes REC/states_now.tsv
 (date, state, owner, controller, cores) and REC/control_now.tsv (date, province, controller), dated by the game's
@@ -29,7 +29,11 @@ def game_day():
 def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
-    rec, day = sys.argv[1], game_day()
+    # outputs always go inside this project: hoi4-custom-ai/recordings/<recording name>
+    rec = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "recordings",
+                       os.path.basename(os.path.normpath(sys.argv[1])))
+    os.makedirs(rec, exist_ok=True)
+    day = game_day()
     now = states()
     with open(os.path.join(rec, "states_now.tsv"), "w", encoding="utf-8") as f:
         f.write("date\tstate\towner\tcontroller\tcores\n")
