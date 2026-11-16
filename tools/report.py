@@ -23,6 +23,24 @@ import sys
 from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from loc import Loc
+
+sys.modules.setdefault("report", sys.modules[__name__])      # report_sections imports this module: share one LOC when run as a script
+
+LOC = Loc()                       # replaced by build() with the game and mods of the recording
+AIR_KINDS = {"small_plane": "Fighters", "small_plane_cas": "Close air support", "small_plane_naval_bomber": "Naval bombers",
+             "medium_plane": "Medium bombers", "large_plane": "Heavy bombers", "transport_plane": "Transport planes"}
+
+
+def nm(key, *alts):
+    """Escaped display name of an id; the id itself when the game and mods have no name for it."""
+    return esc(LOC(key, *alts))
+
+
+def equip_name(k):
+    return AIR_KINDS.get(k) or LOC(k + "_equipment", k)
+
+
 MONTHS = {m: i + 1 for i, m in enumerate(
     "January February March April May June July August September October November December".split())}
 
@@ -75,10 +93,10 @@ def fold(series, keep=8):
     """At most KEEP series: the smallest are summed into one 'Other' (a ninth colour is never invented)."""
     if len(series) <= keep:
         return series
-    ranked = sorted(series, key=lambda s: -max((v for _, v in s[1]), default=0))
+    ranked = sorted(series, key=lambda s: (-max((v for _, v in s[1]), default=0), s[0]))
     head, tail = ranked[:keep - 1], ranked[keep - 1:]
     other = [(d, sum(s[1][i][1] for s in tail if i < len(s[1]))) for i, (d, _) in enumerate(tail[0][1])]
-    return head + [("Other", other)]
+    return head + [("Other: " + ", ".join(s[0] for s in tail), other)]
 
 
 def chart(series, d0, d1, wars=(), stacked=False, height=210, ymax=None, bars=False, pct=False, colors=None):
@@ -175,9 +193,9 @@ def wars_chart(wars, d0, d1):
     for k, w in enumerate(rows):
         a, b = day(w["start"]), day(w.get("end")) or d1
         yy = T + k * RH
-        o.append(f'<text x="{L - 6}" y="{yy + 10:.1f}" class="tick" text-anchor="end">{esc(w["enemy"])}</text>'
+        o.append(f'<text x="{L - 6}" y="{yy + 10:.1f}" class="tick" text-anchor="end">{nm(w["enemy"])}</text>'
                  f'<rect x="{x(a.toordinal()):.1f}" y="{yy + 2}" width="{max(2.0, x(b.toordinal()) - x(a.toordinal())):.1f}" height="{RH - 5}" rx="2" '
-                 f'class="f {"s1" if w.get("attacker") else "s2"}"><title>{esc(w["enemy"])}: {a} to {w.get("end") and b or "ongoing"} ({(b - a).days} days)</title></rect>')
+                 f'class="f {"s1" if w.get("attacker") else "s2"}"><title>{nm(w["enemy"])}: {a} to {w.get("end") and b or "ongoing"} ({(b - a).days} days)</title></rect>')
     o.append("</svg>")
     return (f'<figure class="fig">{"".join(o)}<figcaption class="legend"><span><i class="f s1"></i>declared by the player</span>'
             f'<span><i class="f s2"></i>declared on the player</span></figcaption></figure>')
@@ -195,6 +213,8 @@ def month_dates(keys):
 
 
 def build(rec):
+    global LOC
+    LOC = Loc.for_recording(rec)
     ps = load(os.path.join(rec, "playstyle.json"))
     if not ps:
         raise SystemExit("playstyle.json missing: run examples.py and playstyle.py first")
@@ -233,7 +253,7 @@ def build(rec):
     rows = []
     for w in sorted(wars, key=lambda w: w["start"]):
         a, b = day(w["start"]), day(w.get("end"))
-        rows.append((esc(w["enemy"]), esc(a), esc(b or "ongoing"), f"{((b or d1) - a).days}", "declared" if w.get("attacker") else "attacked"))
+        rows.append((nm(w["enemy"]), esc(a), esc(b or "ongoing"), f"{((b or d1) - a).days}", "declared" if w.get("attacker") else "attacked"))
     sec.append(("Wars", f'<p class="lead">{len(wars)} wars, {sum(1 for w in wars if w.get("attacker"))} declared by {esc(meta["player"])}. Start is the game\'s own date of the war, not the time it was read.</p>' +
                 wars_chart(wars, d0, d1) + more("All wars as a table", table(["enemy", "start", "end", "days", "side"], rows))))
 
@@ -252,22 +272,22 @@ def build(rec):
     pk = sorted({k for m in prod.values() for k in m}, key=lambda k: -max(m.get(k, 0) for m in prod.values()))
     ms = sorted(prod)
     sec.append(("Production", "<p>Military factories on each kind of equipment, replayed from production_lines.tsv.</p>" +
-                chart([(k, [(d, prod[m].get(k, 0)) for m, d in zip(ms, month_dates(ms))]) for k in pk], d0, d1, wars, stacked=True)))
+                chart([(equip_name(k), [(d, prod[m].get(k, 0)) for m, d in zip(ms, month_dates(ms))]) for k in pk], d0, d1, wars, stacked=True)))
 
     # choices
     ch = ps["choices"]
     foc = ch["focus"]
-    sec.append(("National focus", more(f"All {len(foc)} focuses", table(["picked", "focus", "finished"], [(esc(f["date"][:10]), esc(f["focus"]), esc((f.get("finished") or "")[:10])) for f in foc]))))
+    sec.append(("National focus", more(f"All {len(foc)} focuses", table(["picked", "focus", "finished"], [(esc(f["date"][:10]), nm(f["focus"]), esc((f.get("finished") or "")[:10])) for f in foc]))))
     laws = [l for l in ch["laws"] if l["kind"] != "advisor"]
     adv = [l for l in ch["laws"] if l["kind"] == "advisor"]
-    sec.append(("Laws and advisors", table(["date", "kind", "slot", "value", "was"], [(esc(l["date"][:10]), esc(l["kind"]), esc(l["slot"]), esc(l["value"]), esc(l.get("was") or "")) for l in laws + adv])))
+    sec.append(("Laws and advisors", table(["date", "kind", "slot", "value", "was"], [(esc(l["date"][:10]), esc(l["kind"]), esc(l["slot"].replace("_", " ")), nm(l["value"]), nm(l["was"]) if l.get("was") else "") for l in laws + adv])))
     yr = Counter(r["date"][:4] for r in ch["research"])
     ev = Counter(r["date"][:4] for r in ch["events"])
     dc = Counter(r["date"][:4] for r in ch["decisions"])
     years = sorted(set(yr) | set(ev) | set(dc))
     sec.append(("Research, events and decisions per year",
                 table(["year", "techs started", "event choices", "decisions"], [(y, yr[y], ev[y], dc[y]) for y in years]) +
-                "<h3>Techs in order</h3><p class='small'>" + ", ".join(esc(r["tech"]) for r in ch["research"]) + "</p>"))
+                "<h3>Techs in order</h3><p class='small'>" + ", ".join(nm(r["tech"]) for r in ch["research"]) + "</p>"))
     sec.append(("Division templates", more("All templates", table(["date", "name", "battalions", "support"], [
         (esc(t["date"][:10]), esc(t["name"]), esc(t["battalions"] or ""), esc(t["support"] or "")) for t in ch["templates"] if t["change"] == "new"]))))
 

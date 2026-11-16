@@ -60,7 +60,7 @@ def top_names(by_month):
 
 
 def sections(rec, tag, d0, d1, wars):
-    from report import chart, day, esc, table
+    from report import LOC, chart, day, esc, nm, table
     out = []
 
     # occupation: each row of the resistance attack log is the newest attack at the time of the read
@@ -82,7 +82,7 @@ def sections(rec, tag, d0, d1, wars):
                     "the newest attack at each read, so attacks between two reads are not counted (an undercount). Manpower is what the "
                     "log states the attack killed. The recorder wrote no per-state occupation laws for "
                     f"{esc(tag)}, only its default law and garrison template.</p>" +
-                    table(["occupied country", "attacks", "manpower lost"], [(esc(c), n, lost[c]) for c, n in hits.most_common(12)]) +
+                    table(["occupied country", "attacks", "manpower lost"], [(nm(c), n, lost[c]) for c, n in hits.most_common(12)]) +
                     "<h3>Attacks per month</h3>" +
                     chart([("attacks", [(datetime.date(y, m, 15), n) for (y, m), n in sorted(per.items())])], d0, d1, wars, bars=True, height=150)))
 
@@ -123,8 +123,8 @@ def sections(rec, tag, d0, d1, wars):
                     chart(stack_series(by, top_names(by), d0, d1), d0, d1, wars, stacked=True, height=170) +
                     "<h3>Best commanders at the end (attack + defense + planning + logistics)</h3>" +
                     table(["name", "role", "att", "def", "plan", "log", "traits"],
-                          [(esc(r["name"]), esc(r["role"]), r["attack"], r["defense"], r["planning"], r["logistics"],
-                            esc((r["traits"] or "").replace(",", ", "))) for r in top]) +
+                          [(esc(LOC(r["name"])), esc(r["role"]), r["attack"], r["defense"], r["planning"], r["logistics"],
+                            esc(", ".join(LOC(x) for x in (r["traits"] or "").split(",") if x))) for r in top]) +
                     (f"<p class='small'>{len({r[ah.index('admiral')] for r in adm})} admirals appear in admirals.tsv.</p>" if adm else "")))
 
     h, tr = rows_of(rec, "trade")
@@ -147,7 +147,7 @@ def sections(rec, tag, d0, d1, wars):
                 by = replay(mine, h, ["deal"], amount)
                 body += f"<h3>{title}</h3>" + chart(stack_series(by, top_names(by), d0, d1), d0, d1, wars, stacked=True, height=170)
         sellers = Counter(r[ix["exporter"]] for r in deals if r[ix["importer"]] == tag and r[ix["change"]] == "new")
-        body += "<h3>Most deals bought from</h3>" + table(["exporter", "deals"], [(esc(k), n) for k, n in sellers.most_common(8)])
+        body += "<h3>Most deals bought from</h3>" + table(["exporter", "deals"], [(nm(k), n) for k, n in sellers.most_common(8)])
         out.append(("Trade", body))
 
     h, intl = rows_of(rec, "intelligence", country=tag)
