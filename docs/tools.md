@@ -462,6 +462,17 @@ tags `events.tsv` gives the same events. Each row takes the earliest unused matc
 between the log's previous read (less a day) and the row. A row with its command is never `auto`; the commands
 themselves are not separate examples.
 
+### `report.py`
+
+    python tools/report.py RECORDING_DIR [--out FILE]
+
+The after-action report: one self-contained `report.html` (inline SVG, no scripts, no network, light and dark) built
+from `playstyle.json` (required), `apm.json`, `paradrops.tsv` and `reloads.json` (optional). Run `examples.py` then
+`playstyle.py` first. Sections: summary, economy, wars (the game's own start dates), army and your commands,
+production, focuses, laws and advisors, research/events/decisions per year, templates, paratroopers, APM, and a list
+of what the data cannot say. Every figure is read from those files, none is written by hand. Overlapping wars are
+drawn as one shaded band.
+
 ### `playstyle.py`
 
     python tools/playstyle.py RECORDING_DIR [--out FILE]
