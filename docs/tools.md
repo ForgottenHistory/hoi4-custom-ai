@@ -487,7 +487,11 @@ is one action, not a hundred). Gives APM over the whole span from the first to t
 any action, the median and 90th percentile of those, the busiest minute with its in-game date, and actions and commands
 per class. `minutes` and `actions_list` in the JSON are the series. Commands the record holds no owner for (and that
 name none of the player's divisions or country id) are missed, and what the game does for the player by itself is not
-told from a click. Kaiserredux run: 2174 commands, 1411 actions, 9.1 APM (median 7, busiest minute 32).
+told from a click. Input level, off unless asked for: `cmdrec.py --input-apm` also counts key and mouse button presses
+per second while HOI4 is the focused window (`input.tsv`, `hoi4ai/inputrec.py`), and `apm.py` then adds an `input`
+block (presses per minute, keys against clicks). It keeps counts only, never which key or any text or pointer position,
+ignores shift/ctrl/alt, counts nothing while another window is focused, and polls `GetAsyncKeyState` (no hook; Windows
+only). Kaiserredux run: 2174 commands, 1411 actions, 9.1 APM (median 7, busiest minute 32).
 
 ### `orbat.py`
 

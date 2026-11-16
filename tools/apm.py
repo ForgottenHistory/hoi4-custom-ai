@@ -18,6 +18,11 @@ actions and commands per class. In apm.json "minutes" is [{"minute", "actions", 
 minutes with any action ("date" the in-game date at its first action) and "actions" the list of
 {"ms", "class", "commands"}.
 
+Input level: when the folder has input.tsv (cmdrec --input-apm, off by default: counts of key and mouse presses per
+second while HOI4 was focused, hoi4ai/inputrec.py) the summary also holds "input": presses per minute the same way
+(total, active minutes, median, 90th percentile, the busiest minute, keys against clicks) and the per-minute series.
+The minutes there count from the recorder's start, not the first command, and a press is one press (no merging).
+
 Limits: a command the player triggers that the record holds no owner for (and no division of theirs, no country
 id) is not counted, and one the game makes for the player on its own (a focus finishing) is not told from a click.
 Time spent thinking or on menus with no command (reading, the map, a pause) shows as a quiet minute.
@@ -111,6 +116,30 @@ def summary(acts, total_ms):
     }
 
 
+def input_summary(path):
+    """Presses per minute from input.tsv (second, keys, clicks), or None when the file is not there."""
+    if not os.path.exists(path):
+        return None
+    per, keys, clicks, last = {}, 0, 0, 0
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            p = line.rstrip("\n").split("\t")
+            if len(p) == 3 and p[0].isdigit():
+                m = per.setdefault(int(p[0]) // 60, [0, 0])
+                m[0] += int(p[1])
+                m[1] += int(p[2])
+                keys, clicks, last = keys + int(p[1]), clicks + int(p[2]), max(last, int(p[0]))
+    counts = [k + c for k, c in per.values()]
+    total = keys + clicks
+    minutes = (last + 1) / 60
+    return {"presses": total, "keys": keys, "clicks": clicks, "recorded_minutes": round(minutes, 1),
+            "active_minutes": len(per), "apm": round(total / minutes, 2) if total else 0,
+            "apm_active": round(total / len(per), 2) if per else 0,
+            "apm_median_active": pct(counts, 0.5), "apm_p90_active": pct(counts, 0.9),
+            "peak": max(counts) if counts else 0,
+            "minutes": [{"minute": m, "keys": v[0], "clicks": v[1]} for m, v in sorted(per.items())]}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("dir")
@@ -129,6 +158,7 @@ def main():
     acts = actions([(ms - ms0, c, d) for ms, c, d in cmds], a.gap_ms)
     s = summary(acts, ms1 - ms0)
     s.update(player=tag, gap_ms=a.gap_ms, actions_list=[{k: x[k] for k in ("ms", "class", "commands")} for x in acts])
+    s["input"] = input_summary(os.path.join(a.dir, "input.tsv"))
     out = a.out or os.path.join(a.dir, "apm.json")
     with open(out, "w", encoding="utf-8") as f:
         json.dump(s, f)
@@ -138,6 +168,11 @@ def main():
           f"p90 {s['apm_p90_active']}); busiest minute {s['peak']['actions']} actions at {s['peak']['date']}")
     for c, v in list(s["by_class"].items())[:12]:
         print(f"  {c:40s} {v['actions']:6d} actions {v['commands']:7d} commands")
+    i = s["input"]
+    if i:
+        print(f"input: {i['presses']} presses ({i['keys']} keys, {i['clicks']} clicks) in {i['recorded_minutes']} min: "
+              f"{i['apm']} per minute, {i['apm_active']} over active minutes (median {i['apm_median_active']}, "
+              f"p90 {i['apm_p90_active']}, busiest {i['peak']})")
     print("wrote", out)
 
 

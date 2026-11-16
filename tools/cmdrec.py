@@ -58,6 +58,8 @@ country each week (ships, mission, regions, engagement, repair, home base, admir
 they change, to naval.tsv and admirals.tsv.
 Research (hoi4ai/researchrec.py): the tech and design company in each research slot of the country each day and of
 every other producing country each week, and the techs finished, to research.tsv. Research facilities and special projects go to facilities.tsv.
+Input APM (hoi4ai/inputrec.py), OFF unless --input-apm: counts of key and mouse button presses per second while HOI4 is
+the focused window, to input.tsv. Counts only: never which key, never any text or pointer position.
 Analyse with analyze_cmdrec.py.
 """
 import argparse
@@ -133,6 +135,9 @@ def main():
                     help="the state logs read only the player's country, not the others every 7 days")
     ap.add_argument("--profile", action="store_true", help="print how long each log's step takes")
     ap.add_argument("--no-research", action="store_true", help="no research log (research.tsv)")
+    ap.add_argument("--input-apm", action="store_true",
+                    help="also count key and mouse presses per second while HOI4 is focused (input.tsv; counts only, "
+                         "never which key). Off by default: it watches this machine's input, not just the game")
     a = ap.parse_args()
 
     try:
@@ -157,6 +162,12 @@ def main():
         print("this bridge can't record what a market listing holds (no `cmdrec deref`)")
     record = os.path.join(folder, "command_record.tsv")
     print(send("bridge.cmdrec on " + record)[0])
+    keys = None
+    if a.input_apm:
+        from hoi4ai import inputrec
+        keys = inputrec.InputLog(os.path.join(folder, "input.tsv"))
+        if keys.start():
+            print("input APM on: counting key and mouse presses while HOI4 is focused (counts only, to input.tsv)")
     events = eventrec.EventLog(record, os.path.join(folder, "events.tsv"))
     templates = None if a.no_templates else templaterec.TemplateLog(os.path.join(folder, "division_templates.tsv"),
                                                                     events.names)
@@ -292,6 +303,8 @@ def main():
     except KeyboardInterrupt:
         print()
     finally:
+        if keys:
+            print("input presses (keys, clicks):", keys.stop())
         stop.set()
         wake.set()
         worker.join()
