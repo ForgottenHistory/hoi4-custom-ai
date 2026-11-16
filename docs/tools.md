@@ -541,6 +541,12 @@ column: in `diplomacy.tsv` a faction row is `country=HUN kind=faction partner=GE
 leader), and a grep for `GER` finds HUN joining the Axis as if Germany had. Look up what a column holds for each
 `kind` with `--schema` before reading a row.
 
+After a reload of an older save (`reloads.py DIR` lists them from the record's marks and writes `reloads.json`), every
+file holds the repeated stretch twice; add `--final` to `rows.py` to keep only the replay (country.tsv 887 rows → 879
+in the vanilla Germany recording). `focus_timeline.py DIR` rebuilds the player's focus timeline from the daily country
+blocks into `focus_rebuilt.tsv` (politics.tsv's columns, dated by the day), for recordings made before the focus read
+was fixed.
+
 What to remember about the rows:
 - **Dates are when the row was read**, not when the thing happened: the logs read on a thread, a step takes longer than
   a day at speed 5, and a country other than the player's is read weekly. Treat a date as "by this day".

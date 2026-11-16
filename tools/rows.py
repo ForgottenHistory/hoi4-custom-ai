@@ -1,13 +1,16 @@
 """Read a recording's .tsv files by COLUMN NAME, so a tag is never matched in the wrong column.
 
     python rows.py DIR FILE --schema
-    python rows.py DIR FILE [col=value | col!=value | col~substring ...] [--cols a,b,c] [--limit N] [--width N]
+    python rows.py DIR FILE [col=value | col!=value | col~substring ...] [--final] [--cols a,b,c] [--limit N] [--width N]
     python rows.py DIR FILE [filters] --count COLUMN
 
 FILE is the name with or without .tsv (diplomacy, research, politics, facilities, country, ...). Every filter names a
 column of that file's header; an unknown column is an error that lists the real ones, so you cannot grep `GER` and
 catch it in a "partner" or "leader" column by accident. --schema prints the header and the format the file's
 recorder documents (the module docstring), which says what each column holds for each `kind`. Filters are ANDed.
+--final drops the rows of an abandoned timeline: after a reload of an older save the file holds the stretch twice, and
+this keeps only the replay (a row dated more than 72 hours before the rows above it removes every row above it that is
+dated at or after it). Needs a date in the first column. tools/reloads.py lists the reloads.
 Examples:
     python rows.py REC diplomacy kind=faction country=HUN        # HUN's faction rows (partner = the leader)
     python rows.py REC diplomacy kind=faction partner=GER        # the members of GER's faction
@@ -44,6 +47,31 @@ def load(path):
     return header, rows
 
 
+def final_rows(rows):
+    """ROWS (date in column 0) without the abandoned timelines: see --final."""
+    import datetime
+    from hoi4ai.clock import REWIND, parse
+
+    def when(text):
+        d = parse(text)[0]
+        if d is None and re.match(r"^\d{4}-\d\d-\d\d$", text):          # country.tsv: a plain date
+            d = datetime.datetime.strptime(text, "%Y-%m-%d")
+        return d
+    out, dates, top = [], [], None
+    for r in rows:
+        d = when(r[0]) if r else None
+        if d is None:
+            out.append(r), dates.append(None)
+            continue
+        if top is not None and d < top - REWIND:
+            while out and (dates[-1] is None or dates[-1] >= d):
+                out.pop(), dates.pop()
+            top = d
+        top = d if top is None else max(top, d)
+        out.append(r), dates.append(d)
+    return out
+
+
 def module_doc(filename):
     """The docstring of the recorder module that names FILENAME, or ""."""
     for path in sorted(glob.glob(os.path.join(PKG, "*.py"))):
@@ -72,6 +100,7 @@ def main():
     ap.add_argument("file")
     ap.add_argument("filters", nargs="*")
     ap.add_argument("--schema", action="store_true")
+    ap.add_argument("--final", action="store_true", help="drop the abandoned stretch of a reload")
     ap.add_argument("--cols")
     ap.add_argument("--limit", type=int, default=40)
     ap.add_argument("--width", type=int, default=60, help="truncate each value to this many characters (0: no limit)")
@@ -86,6 +115,8 @@ def main():
         print("columns:", " | ".join(header))
         print(module_doc(name) or "(no recorder docstring names this file)")
         return
+    if a.final:
+        rows = final_rows(rows)
     tests = [parse_filter(f, header) for f in a.filters]
     rows = [r for r in rows if all(t(r) for t in tests)]
     if a.count:
