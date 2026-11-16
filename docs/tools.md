@@ -476,6 +476,19 @@ finished, laws and advisors, decisions taken, research picks, event choices, tem
 queued (dated as in `examples.jsonl`), and per war the army commands by kind in the 14 days before and after it
 started with the other choices made in those 14 days.
 
+### `apm.py`
+
+    python tools/apm.py RECORDING_DIR [--gap-ms 400] [--out FILE] [--tag GER]
+
+The player's actions per minute from a cmdrec recording: `apm.json` and a printed summary. The record's `ms` is real
+time, so the minutes are real minutes whatever the game speed. The player's commands are found as `examples.py` finds
+them; commands no more than `--gap-ms` apart count as one action (a click that sends one command per selected division
+is one action, not a hundred). Gives APM over the whole span from the first to the last command, over the minutes with
+any action, the median and 90th percentile of those, the busiest minute with its in-game date, and actions and commands
+per class. `minutes` and `actions_list` in the JSON are the series. Commands the record holds no owner for (and that
+name none of the player's divisions or country id) are missed, and what the game does for the player by itself is not
+told from a click. Kaiserredux run: 2174 commands, 1411 actions, 9.1 APM (median 7, busiest minute 32).
+
 ### `orbat.py`
 
     python tools/orbat.py RECORDING_DIR TAG [--json FILE] [--step 3]
