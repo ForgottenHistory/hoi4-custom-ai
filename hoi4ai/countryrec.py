@@ -6,6 +6,8 @@ CountryLog(folder, tag).step(day) writes, once per day:
   country.tsv         a row of headline numbers: VARIABLES (script game variables through bridge.query), then stability
                       and war support from the block
   equipment.tsv       equipment variants the block names (handle 70): name, type, modules; written once each
+  states.tsv          who owns and who controls every state of every country: date, state, owner, controller. The
+                      first day lists every state, after that a row only where either changed
   intel.tsv           the country's intel over every other existing country, 0-100 (negative: their counter-intelligence
                       outweighs it): civilian, army, navy, air. This is the player's fog of war: the map shows what army
                       intel allows (below 10% division counts are "?", then counts with an error range shrinking to
@@ -43,6 +45,18 @@ def numbers(tag, block):
     m = re.search(r"^\t\t\truling_party=(\w+)", block, re.M)
     out["ruling_party"] = m.group(1) if m else ""
     return out
+
+
+def states():
+    """{state id: (owner tag, controller tag)} for every state of every existing country (one script query)."""
+    lines = query('every_country = { limit = { exists = yes } every_owned_state = { log = "O|[THIS.GetID]|[PREV.GetTag]" } '
+                  'every_controlled_state = { limit = { NOT = { is_owned_by = PREV } } log = "C|[THIS.GetID]|[PREV.GetTag]" } }')
+    owner, ctrl = {}, {}
+    for line in lines:
+        p = line.strip().split("|")
+        if len(p) == 3 and p[1].isdigit() and p[0] in ("O", "C"):
+            (owner if p[0] == "O" else ctrl)[int(p[1])] = p[2]
+    return {i: (o, ctrl.get(i, o)) for i, o in owner.items()}
 
 
 def intel(tag):
@@ -87,6 +101,13 @@ class CountryLog:
         self.f_eq = self._open("equipment.tsv", "id\tname\ttype\tmodules")
         self.f_intel = self._open("intel.tsv", "date\ttarget\t" + "\t".join(INTEL))
         self.equipment = set()
+        self.f_states = self._open("states.tsv", "date\tstate\towner\tcontroller")
+        self.states = {}                        # last written, so a restart carries on instead of repeating every state
+        with open(os.path.join(folder, "states.tsv"), encoding="utf-8") as h:
+            for line in list(h)[1:]:
+                p = line.rstrip("\n").split("\t")
+                if len(p) == 4 and p[1].isdigit():
+                    self.states[int(p[1])] = (p[2], p[3])
 
     def _open(self, name, header):
         path = os.path.join(self.folder, name)
@@ -109,15 +130,19 @@ class CountryLog:
         self.f_num.write(day + "\t" + "\t".join(n[k] for k in self.cols) + "\n")
         for row in intel(self.tag):
             self.f_intel.write(day + "\t" + "\t".join(row) + "\n")
+        for sid, v in sorted(states().items()):
+            if self.states.get(sid) != v:
+                self.f_states.write(f"{day}\t{sid}\t{v[0]}\t{v[1]}\n")
+                self.states[sid] = v
         new = [i for i in handles(block, 70) if i not in self.equipment]
         for eid, a in _addresses(70, new).items():
             v = self.reader.variant(a)
             self.f_eq.write(f"{eid}\t{v.name}\t{v.type}\t{','.join(v.modules)}\n")
             self.equipment.add(eid)
-        for f in (self.f_num, self.f_eq, self.f_intel):
+        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states):
             f.flush()
         return True
 
     def close(self):
-        for f in (self.f_num, self.f_eq, self.f_intel):
+        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states):
             f.close()

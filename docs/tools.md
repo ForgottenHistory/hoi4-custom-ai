@@ -147,8 +147,9 @@ headline numbers (political power, manpower, factories, fuel, experience, stabil
 and the equipment variants the block names by id to `equipment.tsv` (the template ids are in
 `division_templates.tsv`). `intel.tsv` holds the country's intel (civilian, army, navy, air, 0-100) over every
 other country each day: the player's fog of war, since what the map shows of a country's army follows army intel
-(division counts "?" below 10%, then approximate; template details from 30%, exact from 80%). `--no-country` turns it
-off.
+(division counts "?" below 10%, then approximate; template details from 30%, exact from 80%). `states.tsv` holds who
+owns and who controls every state of every country (date, state, owner, controller): all states on the first day, then a
+row only where either changed (recordings made before 2026-11-16 do not have it). `--no-country` turns it off.
 
 Events (`hoi4ai/eventrec.py`): every event any country answers, by click or AI pick, news events included, goes to
 `events.tsv` after each date mark: date, record line, the country answering, the country it came from (for a news
@@ -529,7 +530,7 @@ the wing's name. A design missing from `equipment_designs.tsv` is counted under 
                                 [--no-open]
 
 Maps of a recorded campaign, cropped on the player's land and wherever their divisions went:
-`campaignmap_<TAG>.png` in the recording folder. The recording logs no state ownership, so the land at the start
+`campaignmap_<TAG>.png` in the recording folder. Recordings before 2026-11-16 log no state ownership (states.tsv), so the land at the start
 comes from `history/states` (through the recording's `dlc_load.json` mods) and later land from each `--save` (plain
 text saves: every state's owner, and each province's controller where the save names one). There is one panel per
 date. It colours the player's starting land, land they gained, land they occupy without owning it, land they lost,
