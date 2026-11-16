@@ -575,6 +575,14 @@ province; the paratroopers' `ib0.c` column is the army id). A source order lists
 `4713:ID` since the capture rule of 2026-11-16 (`planrec.RULES`); recordings before it (meme_ger) have none, but their
 paratroopers are the divisions of the order's army with the template "Paratroopers" in the snapshots.
 
+`paradrops.py DIR --tag GER --landed` writes `DIR/paradrops.tsv`, one row per paradrop line (the last target order of a
+line wins): date, owner, army, line, source, target, state, `landed` yes/no, `landed_on` (the snapshot day) and
+`divisions` (how many arrived that day). It reads `unit_snapshots.tsv`: a landing is a division of the order's army
+standing in the source province on one snapshot and in the target province on the next (at most 2 days apart); each
+such move is credited to the latest earlier order of that source and target, so a target used again is not counted
+twice. `no` can also mean the drop fell between snapshots. Run it on a recording after it ends; it is not written
+live. meme_ger: 186 of 227 lines landed (180 with one division, 6 with two).
+
 Checked live on 2026-11-16 (`recordings/paradrop_test`, army 613, airbase Franche-Comte province 6698): the capture rule
 gave the dropping division of each source order (6176, 6161); the first drop (set 15 Sep, executed 28 Sep) put 6176 in
 Bern's province 9620, the second (set 28 Sep, executed 29-30 Sep) put 6161 in Eastern Swiss Alps province 11601, the
