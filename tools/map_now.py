@@ -15,7 +15,7 @@ import os
 import re
 
 import numpy as np
-from PIL import ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 import _bridge  # noqa: F401
 from campaignmap import tag_colour
@@ -104,6 +104,19 @@ def main():
         return col
 
     img = panel(ids, crop, scale, {}, base)
+    # country borders: bold black where two land provinces have different controllers
+    index = {t: i + 1 for i, t in enumerate(sorted(set(control.values())))}
+    who = np.zeros(int(ids.max()) + 1, np.int32)
+    for p, c in control.items():
+        pr = m.provinces.get(p)
+        if pr is not None and pr.kind == "land" and p < len(who):
+            who[p] = index[c]
+    sub = who[ids[y0:y1, x0:x1]]
+    edge = np.zeros(sub.shape, bool)
+    edge[:, 1:] |= (sub[:, 1:] != sub[:, :-1]) & (sub[:, 1:] > 0) & (sub[:, :-1] > 0)
+    edge[1:, :] |= (sub[1:, :] != sub[:-1, :]) & (sub[1:, :] > 0) & (sub[:-1, :] > 0)
+    mask = Image.fromarray(edge.astype(np.uint8) * 255).resize(img.size, Image.NEAREST).filter(ImageFilter.MaxFilter(3))
+    img.paste((0, 0, 0), mask=mask)
     d = ImageDraw.Draw(img)
     by = collections.defaultdict(list)
     for p, c in control.items():
