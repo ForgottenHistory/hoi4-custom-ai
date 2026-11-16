@@ -3,7 +3,7 @@
     python report.py RECORDING_DIR [--out FILE]
 
 Run examples.py, then playstyle.py (and apm.py, paradrops.py --landed if you want those sections) on the folder first;
-this reads their files and writes RECORDING_DIR/report.html:
+this reads their files and writes hoi4-custom-ai/reports/<recording name>.html (or FILE):
   playstyle.json   economy, army, production, wars, choices (required)
   apm.json         actions per minute (optional)
   paradrops.tsv    paradrop lines and whether they landed (optional)
@@ -288,7 +288,9 @@ def main():
             f"<title>{esc(title)}</title><style>{CSS}</style></head><body><main><h1>{esc(title)}</h1>"
             f'<p class="sub">Built by tools/report.py from the recording in {esc(os.path.basename(os.path.abspath(a.dir)))}; every figure is read from its files.</p>' +
             "".join(f"<section><h2>{esc(t)}</h2>{b}</section>" for t, b in sec) + "</main></body></html>")
-    out = a.out or os.path.join(a.dir, "report.html")
+    name = os.path.basename(os.path.abspath(a.dir))
+    out = a.out or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "reports", name + ".html")
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         f.write(page)
     print(f"wrote {out} ({len(page) // 1024} KB, {len(sec)} sections)")

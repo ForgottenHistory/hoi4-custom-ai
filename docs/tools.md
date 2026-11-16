@@ -466,7 +466,7 @@ themselves are not separate examples.
 
     python tools/report.py RECORDING_DIR [--out FILE]
 
-The after-action report: one self-contained `report.html` (inline SVG, no scripts, no network, light and dark) built
+The after-action report: one self-contained page, `reports/<recording name>.html` in this project (inline SVG, no scripts, no network, light and dark) built
 from `playstyle.json` (required), `apm.json`, `paradrops.tsv` and `reloads.json` (optional). Run `examples.py` then
 `playstyle.py` first. Sections: summary, economy, wars (the game's own start dates), army and your commands,
 production, focuses, laws and advisors, research/events/decisions per year, templates, paratroopers, APM,
