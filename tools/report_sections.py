@@ -68,7 +68,7 @@ def done_vs(value, nm):
 
 
 def sections(rec, tag, d0, d1, wars):
-    from report import LOC, chart, day, esc, nm, table
+    from report import LOC, chart, day, esc, nm, pretty, table
     out = []
 
     # occupation: each row of the resistance attack log is the newest attack at the time of the read
@@ -131,7 +131,7 @@ def sections(rec, tag, d0, d1, wars):
                     chart(stack_series(by, top_names(by), d0, d1), d0, d1, wars, stacked=True, height=170) +
                     "<h3>Best commanders at the end (attack + defense + planning + logistics)</h3>" +
                     table(["name", "role", "att", "def", "plan", "log", "traits"],
-                          [(esc(LOC(r["name"])), esc(r["role"]), r["attack"], r["defense"], r["planning"], r["logistics"],
+                          [(esc(LOC(r["name"])), esc(pretty(r["role"])), r["attack"], r["defense"], r["planning"], r["logistics"],
                             esc(", ".join(LOC(x) for x in (r["traits"] or "").split(",") if x))) for r in top]) +
                     (f"<p class='small'>{len({r[ah.index('admiral')] for r in adm})} admirals appear in admirals.tsv.</p>" if adm else "")))
 

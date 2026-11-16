@@ -90,6 +90,14 @@ def fmt(v):
     return f"{v / 1e6:.1f}M" if abs(v) >= 1e6 else f"{v / 1e3:.0f}k" if abs(v) >= 1e4 else f"{v:g}"
 
 
+def pretty(name):
+    """A series name as the game shows it; an id with no text of its own becomes plain words (field_marshal -> Field marshal)."""
+    if re.fullmatch(r"[a-z][a-z0-9]*(_[a-z0-9]+)+", name):
+        v = LOC.get(name)
+        return v or name.replace("_", " ").capitalize()
+    return name
+
+
 def fold(series, keep=8):
     """At most KEEP series: the smallest are summed into one 'Other' (a ninth colour is never invented)."""
     if len(series) <= keep:
@@ -104,7 +112,7 @@ def chart(series, d0, d1, wars=(), stacked=False, height=210, ymax=None, bars=Fa
     """SVG line/area/bar chart with a hover readout. SERIES [(name, [(date, value)])]; dates are datetime.date.
     Colours are the .s1-.s8 classes of the page CSS (fixed order, light and dark); the data of each series is also
     written into data-chart so the page script can show the values under the pointer."""
-    series = fold(series)
+    series = [(pretty(n), pts) for n, pts in fold(series)]
     pick = lambda i: (colors[i] if colors and i < len(colors) else i % 8 + 1)
     W, H, L, R, T, B = 760, height, 44, 12, 12, 26
     n = max(len(s[1]) for s in series)

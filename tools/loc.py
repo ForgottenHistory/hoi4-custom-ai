@@ -108,12 +108,34 @@ def read_scripted(root, into):
             into[nm.group(1)] = opts
 
 
+def read_idea_names(root, into):
+    """Ideas whose `name =` names another key (common/ideas: ideas = { category = { idea = { name = other } } })."""
+    d = os.path.join(root, "common", "ideas")
+    if not os.path.isdir(d):
+        return
+    for n in sorted(os.listdir(d)):
+        if not n.endswith(".txt"):
+            continue
+        text = re.sub(r"#[^\n]*", "", open(os.path.join(d, n), encoding="utf-8-sig", errors="replace").read())
+        depth, stack = 0, []
+        for m in re.finditer(r"([\w.\-']+)\s*=\s*\{|\}|\bname\s*=\s*([\w.\-']+)", text):
+            if m.group(1):
+                stack.append(m.group(1))
+                depth += 1
+            elif m.group(0) == "}":
+                depth = max(0, depth - 1)
+                stack = stack[:depth]
+            elif depth == 3 and len(stack) == 3 and stack[2] != m.group(2):
+                into[stack[2]] = m.group(2)
+
+
 class Loc:
     def __init__(self, tables=None):
         self.t = tables or {}
         self.sources = []          # what was read, for the report's own caveat
         self.missing = []          # enabled mods that could not be read
         self.scripted = {}         # scripted localisation: name -> [(trigger, key)]
+        self.idea_names = {}       # idea id -> the other key its `name =` points at (autarkic_economy_improved -> autarkic_economy)
         self.ctx = {}              # what its triggers are checked against: tag, government, focuses (a set)
         self.roots = []            # game folder then each mod folder, in load order (for icons)
 
@@ -143,6 +165,7 @@ class Loc:
             self.roots.append(path)
         for r in self.roots:
             read_scripted(r, self.scripted)
+            read_idea_names(r, self.idea_names)
         return self
 
     def holds(self, trigger):
@@ -185,7 +208,7 @@ class Loc:
     def __call__(self, key, *alts):
         """Name of KEY (or of the first of ALTS that has one); the id itself when none has."""
         for k in (key,) + alts:
-            v = self.get(k)
+            v = self.get(k) or self.get(self.idea_names.get(k))
             if v:
                 return v
         return str(key)
