@@ -565,6 +565,15 @@ What to remember about the rows:
 - **Counts that look like a cap** (experience at 500) are not checked against the game's rules: look in the game files.
 - `facilities.tsv` holds every country's facilities, projects and rewards, not only the player's.
 
+## Paradrops
+
+`tools/paradrops.py DIR [--tag GER]` lists the paradrop orders of a recording (`COrderSetParadropSourceCommand`:
+airbase province; `COrderSetParadropTargetCommand`: line id and target province) with the state of each province,
+decoded by `hoi4ai.planrec.decode`. An order is a plan, not a landing: whether a drop happened shows in
+`occupation.tsv` and `unit_snapshots.tsv`. The paratrooper divisions of an order come from a capture rule added on
+2026-11-16 (`planrec.RULES`, offsets guessed from the layout); check the first recording made with it before trusting
+that column. The meme_ger recording predates it, so its division column is empty.
+
 ## Checking the data
 
 ### `audit.py`

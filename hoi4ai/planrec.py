@@ -25,6 +25,10 @@ Commands (the army is a handle {53, id} at +0x28 of each, so its id is the int a
   COrderSetInvasionSourceCommand     naval invasion: +0x38 province, +0x40 divisions
   CAddNavalInvasionTargetCommand     +0x30 line id, +0x34 target province
   CRemoveNavalInvasionTargetCommand  +0x30 line id, +0x34 target province
+  COrderSetParadropSourceCommand     +0x34 the airbase's province; +0x38 vector pointer, +0x40 its count (1 in the 489
+                                     orders of the meme_ger recording: the divisions, as handles? NOT verified live)
+  COrderSetParadropTargetCommand     +0x30 line id (counts up per army), +0x34 the target province (land; mostly
+                                     cities). Provinces checked against the map of the meme_ger recording.
   CIncreaseGameSpeedCommand / CDecreaseGameSpeedCommand: no fields (pausing is not a command)
 
 Memory:
@@ -51,6 +55,7 @@ RULES = [
     "list COrderSetPathCommand 0x38 0x40 4",
     "list COrderNewFallbackCommand 0x48 0x50 4",
     "list COrderSetInvasionSourceCommand 0x40 0x48 8",
+    "list COrderSetParadropSourceCommand 0x38 0x40 8",     # a guess from the layout: check the first recording
 ]
 
 COHESION = {0: "flexible", 1: "balanced", 2: "rigid", 3: "immobile"}
@@ -125,6 +130,10 @@ def decode(cls, hexdump, extra=""):
         d.update(what="cohesion", cohesion=COHESION.get(c, c))
     elif cls == "COrderSetInvasionSourceCommand":
         d.update(what="invasion_source", province=_i32(b, 0x38), divisions=_divs(L.get(0x40, [])))
+    elif cls == "COrderSetParadropSourceCommand":
+        d.update(what="paradrop_source", province=_i32(b, 0x34), divisions=_divs(L.get(0x38, [])))
+    elif cls == "COrderSetParadropTargetCommand":
+        d.update(what="paradrop_target", line=_i32(b, 0x30), province=_i32(b, 0x34))
     elif cls == "CAddNavalInvasionTargetCommand":
         d.update(what="invasion_target", line=_i32(b, 0x30), province=_i32(b, 0x34))
     elif cls == "CRemoveNavalInvasionTargetCommand":
