@@ -4,3 +4,6 @@ __pycache__/
 # recorded games: tens of MB each
 recordings/
 .cache/
+
+# generated after-action reports (tools/report.py)
+reports/
