@@ -2,7 +2,7 @@
 
     python tools/map_now.py RECORDING_DIR [--tag GER] [--scale 3] [--out FILE] [--no-open]
 
-Every land province is coloured by who controls it, in the game's own country colours (common/countries colors, mods too; a tag with none gets a hash colour); the land --tag owns but others hold
+Every land province is coloured by who controls it, in the game's own country colours (common/countries colors, mods too; a subject whose autonomy state has use_overlord_color takes its overlord's, from subjects_now.tsv; no colour: hash colour), labelled with the game's own names (names_now.tsv); the land --tag owns but others hold
 (or holds without owning) is outlined in the opposite way: owned-but-lost land is paler, land held without owning is
 hatched with the owner's colour. Tags are written at the middle of each country's land. The crop is Europe (the
 provinces whose continent index is 1, Europe) and the map comes from the recording's mods (dlc_load.json).
@@ -77,8 +77,17 @@ def main():
     crop, scale = (y0, y1, x0, x1), a.scale
 
     game = read_colours(files)
+    # a subject whose autonomy state has use_overlord_color is drawn in its overlord's colour (subjects_now.tsv)
+    path = os.path.join(a.dir, "subjects_now.tsv")
+    overlord = {r["subject"]: r["overlord"] for r in read(path) if r["overlord_colour"] == "yes"} if os.path.exists(path) else {}
+    path = os.path.join(a.dir, "names_now.tsv")
+    names = {r["tag"]: r["name"] for r in read(path)} if os.path.exists(path) else {}
 
     def colour(t):
+        for _ in range(5):                                # an overlord can itself be a subject
+            if t not in overlord:
+                break
+            t = overlord[t]
         return game.get(t) or tag_colour(t)
 
     def base(p):
@@ -108,8 +117,9 @@ def main():
         cx = float(np.median([(m.provinces[p].x - x0) * scale for p in ps]))
         cy = float(np.median([(m.provinces[p].y - y0) * scale for p in ps]))
         mine = t == a.tag
-        d.text((cx, cy), t, fill=(255, 255, 255) if mine else (50, 50, 50), font=big if mine else small, anchor="mm",
-               stroke_width=2, stroke_fill=(0, 0, 0) if mine else (240, 240, 240))
+        label = names.get(t, t).replace(" ", "\n", 1) if len(names.get(t, t)) > 12 else names.get(t, t)
+        d.multiline_text((cx, cy), label, fill=(255, 255, 255) if mine else (50, 50, 50), font=big if mine else small,
+                         anchor="mm", align="center", stroke_width=2, stroke_fill=(0, 0, 0) if mine else (240, 240, 240))
     # occupied without owning: a dot in the owner's colour on each such province
     for p, c in control.items():
         pr = m.provinces.get(p)
@@ -117,7 +127,7 @@ def main():
         if pr and c != o and o and pr.kind == "land" and x0 <= pr.x < x1 and y0 <= pr.y < y1 and a.tag in (c, o):
             cx, cy = (pr.x - x0) * scale, (pr.y - y0) * scale
             d.ellipse((cx - 3, cy - 3, cx + 3, cy + 3), fill=colour(o if c == a.tag else c), outline=(255, 255, 255))
-    d.text((10, 10), f"{day}   in-game country colours; {a.tag}'s land held by others pale; dots = occupied or lost provinces",
+    d.text((10, 10), f"{day}   in-game colours and names (subjects in their overlord's colour); {a.tag}'s land held by others pale; dots = occupied or lost provinces",
            fill=(20, 20, 20), font=font(16), stroke_width=2, stroke_fill=(255, 255, 255))
     out = a.out or os.path.join(a.dir, f"map_now_{a.tag}.png")
     img.save(out)
