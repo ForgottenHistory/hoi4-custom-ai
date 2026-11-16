@@ -21,7 +21,9 @@ minutes with any action ("date" the in-game date at its first action) and "actio
 Input level: when the folder has input.tsv (cmdrec --input-apm, off by default: counts of key and mouse presses per
 second while HOI4 was focused, hoi4ai/inputrec.py) the summary also holds "input": presses per minute the same way
 (total, active minutes, median, 90th percentile, the busiest minute, keys against clicks) and the per-minute series.
-The minutes there count from the recorder's start, not the first command, and a press is one press (no merging).
+A press is one press (no merging). Both are on the record's clock (cmdrec hands the input log the tick at which it turned the
+record on; the record's ms is GetTickCount64 minus that tick), so "minute" means the same minute in both, and "timeline"
+holds each minute's actions, keys and clicks with the in-game date of its first action.
 
 Limits: a command the player triggers that the record holds no owner for (and no division of theirs, no country
 id) is not counted, and one the game makes for the player on its own (a focus finishing) is not told from a click.
@@ -155,10 +157,17 @@ def main():
     if not cmds:
         sys.exit(f"no commands of {tag} in {path}")
     ms0, ms1 = cmds[0][0], cmds[-1][0]
-    acts = actions([(ms - ms0, c, d) for ms, c, d in cmds], a.gap_ms)
+    acts = actions(cmds, a.gap_ms)      # ms stays the record's clock, as input.tsv's seconds are
     s = summary(acts, ms1 - ms0)
     s.update(player=tag, gap_ms=a.gap_ms, actions_list=[{k: x[k] for k in ("ms", "class", "commands")} for x in acts])
     s["input"] = input_summary(os.path.join(a.dir, "input.tsv"))
+    if s["input"]:
+        by = {m["minute"]: {"minute": m["minute"], "actions": m["actions"], "keys": 0, "clicks": 0, "date": m["date"]}
+              for m in s["minutes"]}
+        for m in s["input"]["minutes"]:
+            t = by.setdefault(m["minute"], {"minute": m["minute"], "actions": 0, "keys": 0, "clicks": 0, "date": ""})
+            t["keys"], t["clicks"] = m["keys"], m["clicks"]
+        s["timeline"] = [by[k] for k in sorted(by)]
     out = a.out or os.path.join(a.dir, "apm.json")
     with open(out, "w", encoding="utf-8") as f:
         json.dump(s, f)

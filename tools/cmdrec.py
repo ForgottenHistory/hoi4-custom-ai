@@ -162,10 +162,15 @@ def main():
         print("this bridge can't record what a market listing holds (no `cmdrec deref`)")
     record = os.path.join(folder, "command_record.tsv")
     print(send("bridge.cmdrec on " + record)[0])
+    on_tick = None
+    if a.input_apm and os.name == "nt":      # the record's ms is GetTickCount64() minus the tick it started at
+        import ctypes
+        ctypes.windll.kernel32.GetTickCount64.restype = ctypes.c_uint64
+        on_tick = ctypes.windll.kernel32.GetTickCount64()
     keys = None
     if a.input_apm:
         from hoi4ai import inputrec
-        keys = inputrec.InputLog(os.path.join(folder, "input.tsv"))
+        keys = inputrec.InputLog(os.path.join(folder, "input.tsv"), origin_tick=on_tick)
         if keys.start():
             print("input APM on: counting key and mouse presses while HOI4 is focused (counts only, to input.tsv)")
     events = eventrec.EventLog(record, os.path.join(folder, "events.tsv"))

@@ -8,9 +8,13 @@ OFF unless asked for (cmdrec --input-apm). It watches the machine's input, not t
   - modifier keys (shift, ctrl, alt, win) are not counted, so ctrl+click is one press, not two;
   - it writes one row for each second with a press: nothing for idle seconds.
 
-InputLog(path).start() / .stop() writes input.tsv:
-  #start <unix seconds>            (first line; row seconds count from it)
+InputLog(path, origin_tick=None).start() / .stop() writes input.tsv:
+  #start <unix seconds> <origin tick>   (first line)
   second  keys  clicks
+second counts from ORIGIN_TICK, a GetTickCount64 value (default: when the log starts). cmdrec passes the tick at which
+it turned bridge.cmdrec on, and the bridge stamps every record line with GetTickCount64() minus its own start, so
+second*1000 is on the same clock as the `ms` column of command_record.tsv (to within the round trip, a few ms) and
+apm.py can put presses and commands in the same minute.
 Polls GetAsyncKeyState (no hook, no driver, no extra module). Windows only; elsewhere start() says so and does nothing.
 Pointer movement, the wheel and holding a key down are not presses, so this under-counts a camera pan and over-counts
 nothing.
@@ -48,8 +52,9 @@ def foreground_process():
 
 
 class InputLog:
-    def __init__(self, path, processes=PROCESSES):
+    def __init__(self, path, processes=PROCESSES, origin_tick=None):
         self.path, self.processes = path, tuple(p.lower() for p in processes)
+        self.origin_tick = origin_tick
         self.stop_event = threading.Event()
         self.thread = None
         self.total = [0, 0]
@@ -71,10 +76,13 @@ class InputLog:
     def _run(self):
         get = ctypes.windll.user32.GetAsyncKeyState
         down = {v: False for v in KEYS + CLICKS}
-        begin = time.time()
+        tick = ctypes.windll.kernel32.GetTickCount64
+        tick.restype = ctypes.c_uint64
+        begin_tick = self.origin_tick if self.origin_tick is not None else tick()
+        begin = time.time() - (tick() - begin_tick) / 1000
         with open(self.path, "a", encoding="utf-8") as f:
             if f.tell() == 0:
-                f.write(f"#start\t{begin:.3f}\nsecond\tkeys\tclicks\n")
+                f.write(f"#start\t{begin:.3f}\t{begin_tick}\nsecond\tkeys\tclicks\n")
             sec, keys, clicks, since, focused = None, 0, 0, 0.0, False
             while not self.stop_event.is_set():
                 now = time.time()
@@ -86,7 +94,7 @@ class InputLog:
                     if d and not down[v] and focused:
                         presses[v in CLICKS] += 1
                     down[v] = d
-                s = int(now - begin)
+                s = int((tick() - begin_tick) // 1000)
                 if s != sec:
                     if sec is not None and (keys or clicks):
                         f.write(f"{sec}\t{keys}\t{clicks}\n")

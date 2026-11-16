@@ -491,7 +491,7 @@ told from a click. Input level, off unless asked for: `cmdrec.py --input-apm` al
 per second while HOI4 is the focused window (`input.tsv`, `hoi4ai/inputrec.py`), and `apm.py` then adds an `input`
 block (presses per minute, keys against clicks). It keeps counts only, never which key or any text or pointer position,
 ignores shift/ctrl/alt, counts nothing while another window is focused, and polls `GetAsyncKeyState` (no hook; Windows
-only). Kaiserredux run: 2174 commands, 1411 actions, 9.1 APM (median 7, busiest minute 32).
+only). Kaiserredux run: 2174 commands, 1411 actions, 9.1 APM (median 7, busiest minute 38). `input.tsv` seconds and the record's `ms` share one clock (`cmdrec` hands the input log the `GetTickCount64` tick at which it turned the record on), so `timeline` in `apm.json` holds each record minute's actions, keys and clicks together.
 
 ### `orbat.py`
 
