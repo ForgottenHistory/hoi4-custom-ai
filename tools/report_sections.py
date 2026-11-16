@@ -59,6 +59,14 @@ def top_names(by_month):
     return [k for k, _ in peak.most_common()]
 
 
+def done_vs(value, nm):
+    """'FRA 1 SOV 2' (target, times) as 'France ×1, Soviet Union ×2'."""
+    w = value.split()
+    if len(w) % 2 or not all(w[i + 1].isdigit() for i in range(0, len(w), 2)):
+        return nm(value)
+    return ", ".join(f"{nm(w[i])} ×{w[i + 1]}" for i in range(0, len(w), 2))
+
+
 def sections(rec, tag, d0, d1, wars):
     from report import LOC, chart, day, esc, nm, table
     out = []
@@ -160,8 +168,8 @@ def sections(rec, tag, d0, d1, wars):
         body = f"<p>{len(began)} different operations were started and {len(done)} finished (intelligence.tsv).</p>"
         if done:
             body += table(["date", "finished operation", "result"],
-                          [(esc(r[0].split(",", 1)[1].strip()), esc(r[ix["key"]].replace("finished ", "")), esc(r[ix["value"]])) for r in done])
+                          [(esc(r[0].split(",", 1)[1].strip()), nm(r[ix["key"]].replace("finished ", "").strip()), done_vs(r[ix["value"]], nm)) for r in done])
         if ups:
-            body += "<h3>Agency upgrades</h3>" + table(["date", "upgrade"], [(esc(r[0].split(",", 1)[1].strip()), esc(r[ix["value"]])) for r in ups])
+            body += "<h3>Agency upgrades</h3>" + table(["date", "upgrade"], [(esc(r[0].split(",", 1)[1].strip()), nm(r[ix["value"]])) for r in ups])
         out.append(("Intelligence", body))
     return out
