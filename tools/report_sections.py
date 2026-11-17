@@ -252,11 +252,10 @@ def sections(rec, tag, d0, d1, wars):
             out.append(("Air support in battles",
                         "<p>Air wings of " + esc(tag) + " that were in a land combat (read from the combat's own list of air wings, daily). "
                         "Each wing: how many different battles (provinces) and days it was in, whether it was mostly on the attacking side "
-                        "(side a) or defending, and the mean of its raw combat value. That last number is read as is from the game's memory "
-                        "and is most likely the CAS effect the combat window shows (0 to 100; the German wings in the Katowice test read 29 to 81, "
-                        "and 0 on days the wing did not strike). It is a snapshot of that day, not a running total, and the strength and "
-                        "organisation it takes off the ground troops is not separated from the ground fighting in the battle numbers.</p>" +
-                        table(["country", "wing", "mission", "planes", "battles", "days", "mostly", "CAS value (mean)"], rows[:30])))
+                        "(side a) or defending, and the mean number of its planes that took part in the fights (the combat window's support planes; 0 on days "
+                        "it did not fly). The strength and organisation CAS takes off the ground troops, and the planes shot down, are not "
+                        "recorded: they are not decoded yet and are not separated from the ground fighting in the battle numbers.</p>" +
+                        table(["country", "wing", "mission", "planes", "battles", "days", "mostly", "support planes (mean)"], rows[:30])))
 
     h, nav = rows_of(rec, "naval", country=tag)
     if nav:
