@@ -321,6 +321,8 @@ def main():
                     # unit leaders and more, so the class filter matters): two blocks with the same day
                     send(f"bridge.snap {day} 51 {SNAP_FIELDS}", f"bridge.snap {day} 4713 {SNAP_FIELDS}")
                     last_day = day
+                    if trace and day:
+                        trace.day = day
                     if battles and day:
                         try:
                             battles.step(day)

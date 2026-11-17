@@ -257,6 +257,44 @@ def sections(rec, tag, d0, d1, wars):
                         "recorded: they are not decoded yet and are not separated from the ground fighting in the battle numbers.</p>" +
                         table(["country", "wing", "mission", "planes", "battles", "days", "mostly", "support planes (mean)"], rows[:30])))
 
+    # casualties per fight: the last raw state of each combat (battle_raw.tsv, CombatTrace), joined to battles.tsv for who fought
+    rawp = os.path.join(rec, "battle_raw.tsv")
+    if os.path.exists(rawp) and bt:
+        import struct as _st
+        by_prov = {}
+        for r in bt:                                    # rows are in date order: keep the latest row of each province
+            by_prov[r[ix["province"]]] = (r[ix["a_tags"]].split(), r[ix["b_tags"]].split())
+        EST = 3300.0                                    # counter units per man, 3065-3383 in the fights checked
+        cas = []
+        with open(rawp, encoding="utf-8") as fh:
+            next(fh, None)
+            for line in fh:
+                p = line.rstrip("\n").split("\t")
+                if len(p) < 10:
+                    continue
+                date, pid, ticks = p[0], p[2], p[3]
+                a, b = by_prov.get(pid, ([], []))
+                if tag not in a and tag not in b:
+                    continue
+
+                def cnt(h, off):
+                    return _st.unpack_from("<i", bytes.fromhex(h), off)[0]
+                sa, sb = p[6], p[7]
+                if not sa or not sb:
+                    continue
+                la, lb = cnt(sa, 0x178), cnt(sa, 0x220)         # ground damage taken by side a, by side b
+                aa, ab = cnt(sa, 0x168), cnt(sb, 0x168)         # air damage taken by side a, by side b
+                cas.append((date or "?", pid, ticks, nm(a[0]) + " vs " + nm(b[0]) if a and b else "?",
+                            round(la / EST), round(aa / EST), round(lb / EST), round(ab / EST)))
+        if cas:
+            out.append(("Battle casualties (estimated)",
+                        "<p>Manpower each side lost in every land fight " + esc(tag) + " was in, read from the combat's own damage counters "
+                        "just before it ended (battle_raw.tsv). They are fixed-point casualty damage, matched against the game's battle log in "
+                        "three fights (Poznan, Zaolzie, Krakow): counter / about 3,300 gives the men lost, but the factor ran from 3,065 to 3,383, so each figure is an "
+                        "estimate good to about 5%, not the exact number the game's battle log shows. Side a is most likely the attacker. "
+                        "Ticks are combat hours. Fights shorter than the polling interval, or before this recorder, are missing.</p>" +
+                        table(["day", "province", "ticks", "side a vs side b", "a: ground", "a: air", "b: ground", "b: air"], cas[:80])))
+
     h, nav = rows_of(rec, "naval", country=tag)
     if nav:
         def ships(state):

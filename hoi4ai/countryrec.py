@@ -253,7 +253,10 @@ class CombatTrace:
     then hex of the combat (0x200 bytes), both sides (0x400 each) and each air entry (0xa0). Raw on purpose: decode
     from the file (the counters are not identified yet)."""
 
-    COLS = "wall\tprovince\tticks\tclock\tcombat\tside_a\tside_b\tair_a\tair_b"
+    COLS = "date\twall\tprovince\tticks\tclock\tcombat\tside_a\tside_b\tair_a\tair_b"
+    # side counters (fixed point, found by matching the game's battle log, see docs/tools.md): +0x178 = ground damage
+    # side a took (= side b +0x220), +0x220 = ground damage side b took, +0x168 = air damage that side took; casualties are
+    # about counter / 3300 (3065-3383 across fights)
 
     def __init__(self, folder, every=0.1):          # a poll takes ~1 ms; a 1 s interval missed fights of a few ticks
         import threading
@@ -261,6 +264,14 @@ class CombatTrace:
         self.proc, self.every, self.live, self._mgr, self._stop = Process(), every, {}, None, threading.Event()
         path = os.path.join(folder, "battle_raw.tsv")
         new = not os.path.exists(path)
+        self.day = ""                           # set by cmdrec's date loop
+        if not new:
+            with open(path, encoding="utf-8") as h:
+                lines = h.read().split("\n")
+            if lines and not lines[0].startswith("date\t"):     # older file without the date column: pad it
+                lines = [self.COLS] + ["\t" + ln for ln in lines[1:] if ln]
+                with open(path, "w", encoding="utf-8") as h:
+                    h.write("\n".join(lines) + "\n")
         self.f = open(path, "a", encoding="utf-8")
         if new:
             self.f.write(self.COLS + "\n")
@@ -316,7 +327,7 @@ class CombatTrace:
         import struct, time
         pid, cb, sa, sb, air = snap
         ticks, clock = struct.unpack_from("<i", cb, 0x40)[0], struct.unpack_from("<i", cb, 0x130)[0]
-        self.f.write("\t".join([str(int(time.time())), str(pid), str(ticks), str(clock), cb.hex(), sa.hex(), sb.hex(),
+        self.f.write("\t".join([self.day, str(int(time.time())), str(pid), str(ticks), str(clock), cb.hex(), sa.hex(), sb.hex(),
                                 air[0], air[1]]) + "\n")
         self.f.flush()
 
