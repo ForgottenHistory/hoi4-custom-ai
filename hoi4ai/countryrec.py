@@ -25,6 +25,7 @@ division_templates.tsv (hoi4ai/templaterec.py, every country's templates) the te
 import gzip
 import os
 import re
+import struct
 
 from hoi4bridge import country_block, query, send
 
@@ -255,6 +256,7 @@ class BattleLog:
         self.proc = Process()
         self.f_battles = self._open("battles.tsv", "date	province	a_tags	a_divs	a_org	a_strength	b_tags	b_divs	b_org	b_strength	controller")
         self.f_battle_divs = self._open("battle_divisions.tsv", "date	province	side	division	owner	org	strength")
+        self.f_battle_air = self._open("battle_air.tsv", "date\tprovince\tside\twing\t" + "\t".join(f"f{o:x}" for o in range(0x10, 0x3c, 4)))
 
     _open = CountryLog._open
 
@@ -265,11 +267,13 @@ class BattleLog:
         self._battles(day)
         self.f_battles.flush()
         self.f_battle_divs.flush()
+        self.f_battle_air.flush()
         return True
 
     def close(self):
         self.f_battles.close()
         self.f_battle_divs.close()
+        self.f_battle_air.close()
 
     def _battles(self, day):
         """Every land combat in the world right now, one row each (battles.tsv). Sides a and b are the combat's two
@@ -305,7 +309,7 @@ class BattleLog:
             if not prov or not all(sides) or any(self.proc.class_of(s) != "CLandCombatant" for s in sides):
                 continue                        # a freed combat the memory scan still finds
             pid = i32(prov + 0xa4)
-            row, lines = [day, str(pid)], []
+            row, lines, air = [day, str(pid)], [], []
             for side, s in zip("ab", sides):
                 ptr, n = u64(s + 0x20), i32(s + 0x28)
                 tags, org, st = [], 0, 0
@@ -320,9 +324,18 @@ class BattleLog:
                     lines.append(f"{day}\t{pid}\t{side}\t{i32(a + 0xc)}\t{tags[-1]}\t{i32(a + 0x490)}\t{i32(a + 0x458)}\n")
                 row += [" ".join(tags), str(len(tags)), "%.1f" % (org / 1000 / len(tags)) if tags else "0",
                         "%.1f" % (st / 1000 / len(tags)) if tags else "0"]
+                # air wings in this side's combat: CLandCombatant +0x140 vector (count +0x148) of CAirInLandCombat, each
+                # holding a wing handle (type 69, id at +0xc). The other fields are not decoded yet: kept raw (ints at +0x10..+0x3c)
+                vp, cn = u64(s + 0x140), i32(s + 0x148)
+                for k in range(cn if 0 < cn < 100 else 0):
+                    el = u64(vp + 8 * k)
+                    if el and self.proc.class_of(el) == "CAirInLandCombat":
+                        raw = struct.unpack("<11i", self.proc.read(el + 0x10, 44) or bytes(44))
+                        air.append(f"{day}\t{pid}\t{side}\t{i32(el + 0xc)}\t" + "\t".join(map(str, raw)) + "\n")
             if "".join(lines) in seen:
                 continue                        # the scan can list one combat twice
             seen.add("".join(lines))
             self.f_battle_divs.write("".join(lines))
+            self.f_battle_air.write("".join(air))
             row.append(self.names.tag(i32(prov + 0x188)))       # who holds the province today: the outcome, day by day
             self.f_battles.write("\t".join(row) + "\n")

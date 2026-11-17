@@ -226,6 +226,37 @@ def sections(rec, tag, d0, d1, wars):
                             "is not men killed, and a division replaced by a new one is not seen as lost.</p>" +
                             table(["province", "recorded", "country", "divisions", "lost", "reinforced", "net", "org / step"], rows[:40])))
 
+    # air wings flying over land battles: battle_air.tsv (wing id = air.tsv wing id) joined to air.tsv for country, name, planes
+    hb, ba = rows_of(rec, "battle_air")
+    ha, aw = rows_of(rec, "air")
+    if ba and aw:
+        bx = {c: i for i, c in enumerate(hb)}
+        ax = {c: i for i, c in enumerate(ha)}
+        wings = {r[ax["wing"]]: (r[ax["country"]], r[ax["name"]], r[ax["mission"]], r[ax["planes"]]) for r in aw}
+        agg = {}
+        for r in ba:
+            w = wings.get(r[bx["wing"]])
+            if not w:
+                continue
+            g = agg.setdefault(r[bx["wing"]], {"prov": set(), "days": set(), "side": Counter(), "val": 0, "n": 0})
+            g["prov"].add(r[bx["province"]])
+            g["days"].add(r[bx["date"]])
+            g["side"][r[bx["side"]]] += 1
+            g["val"] += int(r[bx["f14"]])
+            g["n"] += 1
+        rows = [(nm(w[0]), w[1], w[2], w[3], len(g["prov"]), len(g["days"]),
+                 "attacking" if g["side"]["a"] >= g["side"]["b"] else "defending", f"{g['val'] / g['n']:.1f}")
+                for wid, g in agg.items() for w in [wings[wid]] if w[0] == tag or tag in ("",)]
+        rows.sort(key=lambda r: -r[4])
+        if rows:
+            out.append(("Air support in battles",
+                        "<p>Air wings of " + esc(tag) + " that were in a land combat (read from the combat's own list of air wings, daily). "
+                        "Each wing: how many different battles (provinces) and days it was in, whether it was mostly on the attacking side "
+                        "(side a) or defending, and the mean of its raw combat value. That last number is read as is from the game's memory "
+                        "and its unit is <b>not decoded yet</b>, so use it only to compare wings. Damage to strength and organisation from "
+                        "CAS is not separated from the ground fighting in the battle numbers.</p>" +
+                        table(["country", "wing", "mission", "planes", "battles", "days", "mostly", "raw value"], rows[:30])))
+
     h, nav = rows_of(rec, "naval", country=tag)
     if nav:
         def ships(state):
