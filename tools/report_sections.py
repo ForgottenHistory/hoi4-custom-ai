@@ -285,15 +285,16 @@ def sections(rec, tag, d0, d1, wars):
                 la, lb = cnt(sa, 0x178), cnt(sa, 0x220)         # ground damage taken by side a, by side b
                 aa, ab = cnt(sa, 0x168), cnt(sb, 0x168)         # air damage taken by side a, by side b
                 cas.append((date or "?", pid, ticks, nm(a[0]) + " vs " + nm(b[0]) if a and b else "?",
-                            round(la / EST), round(aa / EST), round(lb / EST), round(ab / EST)))
+                            round(la / EST), round(aa / EST), round(lb / EST), round(ab / EST),
+                            "%d / %d" % (cnt(sa, 0x170) // 100000, aa // 100000), "%d / %d" % (cnt(sb, 0x170) // 100000, ab // 100000)))
         if cas:
             out.append(("Battle casualties (estimated)",
                         "<p>Manpower each side lost in every land fight " + esc(tag) + " was in, read from the combat's own damage counters "
                         "just before it ended (battle_raw.tsv). They are fixed-point casualty damage, matched against the game's battle log in "
                         "three fights (Poznan, Zaolzie, Krakow): counter / about 3,300 gives the men lost, but the factor ran from 3,065 to 3,383, so each figure is an "
                         "estimate good to about 5%, not the exact number the game's battle log shows. Side a is most likely the attacker. "
-                        "Ticks are combat hours. Fights shorter than the polling interval, or before this recorder, are missing.</p>" +
-                        table(["day", "province", "ticks", "side a vs side b", "a: ground", "a: air", "b: ground", "b: air"], cas[:80])))
+                        "Ticks are combat hours. The last two columns are the air support damage to organisation and strength in the combat window (the counters at +0x170 and +0x168 divided by 100,000, rounded down; matched to 12 readings of the Danzig fight). Fights shorter than the polling interval, or before this recorder, are missing.</p>" +
+                        table(["day", "province", "ticks", "side a vs side b", "a: ground", "a: air", "b: ground", "b: air", "a took CAS org / str", "b took CAS org / str"], cas[:80])))
 
     h, nav = rows_of(rec, "naval", country=tag)
     if nav:
