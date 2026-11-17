@@ -310,7 +310,10 @@ class BattleLog:
                 ptr, n = u64(s + 0x20), i32(s + 0x28)
                 tags, org, st = [], 0, 0
                 for k in range(n if 0 <= n < 200 else 0):
-                    a = u64(ptr + 8 * k) + 0x10
+                    el = u64(ptr + 8 * k)
+                    if not el or self.proc.class_of(el) != "CArmy":
+                        continue                # a stale slot in the list (division id 0, org and strength 0)
+                    a = el + 0x10
                     tags.append(self.names.tag(i32(a + 0x1c8)))
                     org += i32(a + 0x490)
                     st += i32(a + 0x458)
