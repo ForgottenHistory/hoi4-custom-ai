@@ -9,6 +9,9 @@ CountryLog(folder, tag).step(day) writes, once per day:
   states.tsv          owner, controller and cores (tags, space-separated) of every state of every country: date, state,
                       owner, controller, cores. The first day lists every state, after that a row only where one changed
   control.tsv         who controls each province (live.Provinces): date, province, controller; changes only after day one
+  war_stats.tsv       casualties and war-score parts of each war the country is in (tools/war_stats.py backfills): WAR_COLS
+  battles.tsv         every land combat in the world each day: province, then per side (a = attacker as far as seen) the
+                      divisions' owner tags, count, mean organisation and strength in percent (_battles)
   intel.tsv           the country's intel over every other existing country, 0-100 (negative: their counter-intelligence
                       outweighs it): civilian, army, navy, air. This is the player's fog of war: the map shows what army
                       intel allows (below 10% division counts are "?", then counts with an error range shrinking to
@@ -151,6 +154,7 @@ class CountryLog:
                     self.control[int(p[1])] = p[2]
         self.provinces, self.names = None, None
         self.f_wars = self._open("war_stats.tsv", "date\t" + "\t".join(WAR_COLS))
+        self.f_battles = self._open("battles.tsv", "date\tprovince\ta_tags\ta_divs\ta_org\ta_strength\tb_tags\tb_divs\tb_org\tb_strength")
         self.wars = {}                          # (first, second, start) -> last written values
         with open(os.path.join(folder, "war_stats.tsv"), encoding="utf-8") as h:
             for line in list(h)[1:]:
@@ -188,14 +192,47 @@ class CountryLog:
             if self.wars.get(tuple(row[:3])) != row:
                 self.wars[tuple(row[:3])] = row
                 self.f_wars.write(day + "\t" + "\t".join(row) + "\n")
+        self._battles(day)
         new = [i for i in handles(block, 70) if i not in self.equipment]
         for eid, a in _addresses(70, new).items():
             v = self.reader.variant(a)
             self.f_eq.write(f"{eid}\t{v.name}\t{v.type}\t{','.join(v.modules)}\n")
             self.equipment.add(eid)
-        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control, self.f_wars):
+        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control, self.f_wars, self.f_battles):
             f.flush()
         return True
+
+    def _battles(self, day):
+        """Every land combat in the world right now, one row each (battles.tsv). Side a is the first combatant of the
+        CLandCombat (+0x28; the attacker as far as seen: Germany and German Italy against Switzerland), side b the
+        second (+0x30). Divisions are CArmy objects (offsets are relative to the object + 0x10, see
+        docs/game-layouts.md): owner +0x1c8, organisation +0x490 and strength +0x458 (100000 = 100%). Per side: tags
+        of its divisions (space-separated, in order), their count, mean organisation and mean strength in percent."""
+        import struct
+        from hoi4ai.eventrec import Names
+        if self.names is None:
+            self.names = Names()
+        u64 = self.proc.u64
+
+        def i32(a):
+            b = self.proc.read(a, 4)
+            return struct.unpack("<i", b)[0] if b else 0
+
+        for c in self.proc.find_objects("CLandCombat"):
+            prov = u64(c + 0x38)
+            row = [day, str(i32(prov + 0xa4)) if prov else "0"]
+            for side in (0x28, 0x30):
+                s = u64(c + side)
+                ptr, n = (u64(s + 0x20), i32(s + 0x28)) if s else (0, 0)
+                tags, org, st = [], 0, 0
+                for k in range(n if 0 <= n < 200 else 0):
+                    a = u64(ptr + 8 * k) + 0x10
+                    tags.append(self.names.tag(i32(a + 0x1c8)))
+                    org += i32(a + 0x490)
+                    st += i32(a + 0x458)
+                row += [" ".join(tags), str(len(tags)), "%.1f" % (org / 1000 / len(tags)) if tags else "0",
+                        "%.1f" % (st / 1000 / len(tags)) if tags else "0"]
+            self.f_battles.write("\t".join(row) + "\n")
 
     def _control(self, day):
         """Who controls each province (live.Provinces): every province the first day, then only the changes. A state held
@@ -212,5 +249,5 @@ class CountryLog:
                 self.f_control.write(f"{day}\t{p}\t{self.control[p]}\n")
 
     def close(self):
-        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control, self.f_wars):
+        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control, self.f_wars, self.f_battles):
             f.close()
