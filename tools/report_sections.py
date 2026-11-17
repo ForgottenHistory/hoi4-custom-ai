@@ -102,8 +102,10 @@ def sections(rec, tag, d0, d1, wars):
         if ws:
             rec_ws = folder
             break
+    war_foes = None         # the countries tag was at war with, to drop stray owner tags from the battle tables
     if ws:
         ix = {c: i for i, c in enumerate(h)}
+        war_foes = {r[ix["second"]] for r in ws if r[ix["first"]] == tag} | {r[ix["first"]] for r in ws if r[ix["second"]] == tag}
         last = {}
         for r in ws:
             last[(r[ix["first"]], r[ix["second"]], r[ix["start"]])] = r
@@ -138,7 +140,7 @@ def sections(rec, tag, d0, d1, wars):
         for r in bt:
             a, b = r[ix["a_tags"]].split(), r[ix["b_tags"]].split()
             if tag in a or tag in b:
-                other = {t for t in (b if tag in a else a) if t != tag and t != "?"}
+                other = {t for t in (b if tag in a else a) if t != tag and t != "?" and (war_foes is None or t in war_foes)}
                 for t in other:
                     days[t] += 1
                 front[r[ix["province"]]] += 1
@@ -152,6 +154,8 @@ def sections(rec, tag, d0, d1, wars):
         # results: per province, from the controller column (recordings made after 2026-11-17 evening; absent = no section)
         if "controller" in ix:
             lastday = max(r[ix["date"]] for r in bt)
+            hc, cr = rows_of(rec, "control")        # changes only: the last row of a province is who holds it now
+            now = {r[1]: r[2] for r in cr} if cr else {}
             prov = {}
             for r in bt:            # rows are in date order
                 a, b = r[ix["a_tags"]].split(), r[ix["b_tags"]].split()
@@ -165,22 +169,23 @@ def sections(rec, tag, d0, d1, wars):
                 p["last"], p["c1"] = r[ix["date"]], r[ix["controller"]]
             res = []
             for pid, p in sorted(prov.items(), key=lambda kv: kv[1]["first"]):
+                c1 = now.get(pid, p["c1"])      # the battle's last day still shows the old holder: the change comes after it
                 if p["last"] == lastday:
                     out_ = "still fighting"
-                elif p["c1"] == p["att"] and p["c0"] != p["att"]:
+                elif c1 == p["att"] and p["c0"] != p["att"]:
                     out_ = "attacker took it"
-                elif p["c1"] == p["c0"]:
+                elif c1 == p["c0"]:
                     out_ = "held"
                 else:
-                    out_ = "changed hands (" + nm(p["c1"]) + ")"
+                    out_ = "changed hands (" + nm(c1) + ")"
                 res.append((pid, p["first"], p["last"], len(p["days"]), nm(p["att"]) + " vs " + nm(p["def"]), out_))
             if res:
                 tally = Counter(r[5].split(" (")[0] for r in res)
                 out.append(("Battle results",
                             "<p>Each province " + esc(tag) + " fought in: first and last day of combat, battle days, the side that started "
                             "as side a (most likely the attacker, since the Polish campaign: about 9 in 10 of Germany's fights were side a) and "
-                            "who held the province when the last battle was seen. " + ", ".join(f"{k}: {v}" for k, v in tally.most_common()) +
-                            ". The controller is read from the province each day, so a province lost and retaken shows as held.</p>" +
+                            "who holds the province now (control.tsv; the daily controller column in battles.tsv if it has no later change). " + ", ".join(f"{k}: {v}" for k, v in tally.most_common()) +
+                            ". A province lost and retaken shows as held.</p>" +
                             table(["province", "first", "last", "battle days", "attacker vs defender", "result"], res[:60])))
 
         # damage: each division's strength from the first to the last recorded day it fought in a province
