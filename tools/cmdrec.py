@@ -221,6 +221,7 @@ def main():
     plans = None if a.no_plans else planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = None if a.no_country else countryrec.CountryLog(folder, tag)
     battles = None if a.no_country else countryrec.BattleLog(folder)   # light: read in the date loop, every day
+    wars = None if a.no_country else countryrec.WarLog(folder, tag)    # ~1 s: on its own thread, every day it gets to
     loggers = [(n, v) for n, v in (("templates", templates), ("designs", designs), ("production", production),
                                    ("mios", mios), ("market", market), ("doctrines", doctrines),
                                    ("spirits", spirits), ("politics", politics), ("economy", economy),
@@ -286,6 +287,20 @@ def main():
     # mark before it) while a step takes longer than the game spends on a day at high speed.
     worker = threading.Thread(target=work, name="logs", daemon=True)
     worker.start()
+
+    def war_work():
+        while not stop.is_set():
+            time.sleep(0.2)
+            d = latest["date"]
+            day = day_label(d) if d else None
+            if day and wars and day != wars.day:
+                try:
+                    wars.step(day)
+                except Exception as e:  # noqa: BLE001
+                    print(f"\nwars: {type(e).__name__}: {e}")
+
+    war_worker = threading.Thread(target=war_work, name="wars", daemon=True)
+    war_worker.start()
     last, last_day = None, None
     try:
         while True:
@@ -319,8 +334,10 @@ def main():
         stop.set()
         wake.set()
         worker.join()
-        if battles:
-            battles.close()
+        war_worker.join()
+        for lg in (battles, wars):
+            if lg:
+                lg.close()
         print(send("bridge.cmdrec off")[0])
         events.step()
         shared.new_step()

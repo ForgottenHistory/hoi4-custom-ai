@@ -155,14 +155,6 @@ class CountryLog:
                 if len(p) == 3 and p[1].isdigit():
                     self.control[int(p[1])] = p[2]
         self.provinces, self.names = None, None
-        self.f_wars = self._open("war_stats.tsv", "date\t" + "\t".join(WAR_COLS))
-        self.wars = {}                          # (first, second, start) -> last written values
-        with open(os.path.join(folder, "war_stats.tsv"), encoding="utf-8") as h:
-            for line in list(h)[1:]:
-                p = line.rstrip("\n").split("\t")
-                if len(p) == 1 + len(WAR_COLS):
-                    self.wars[tuple(p[1:4])] = p[1:]
-
     def _open(self, name, header):
         path = os.path.join(self.folder, name)
         new = not os.path.exists(path)
@@ -189,16 +181,12 @@ class CountryLog:
                 self.f_states.write(f"{day}\t{sid}\t{v[0]}\t{v[1]}\t{v[2]}\n")
                 self.states[sid] = v
         self._control(day)
-        for row in war_rows(block):
-            if self.wars.get(tuple(row[:3])) != row:
-                self.wars[tuple(row[:3])] = row
-                self.f_wars.write(day + "\t" + "\t".join(row) + "\n")
-        new = [i for i in handles(block, 70) if i not in self.equipment]
+        new =[i for i in handles(block, 70) if i not in self.equipment]
         for eid, a in _addresses(70, new).items():
             v = self.reader.variant(a)
             self.f_eq.write(f"{eid}\t{v.name}\t{v.type}\t{','.join(v.modules)}\n")
             self.equipment.add(eid)
-        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control, self.f_wars):
+        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control):
             f.flush()
         return True
 
@@ -217,8 +205,43 @@ class CountryLog:
                 self.f_control.write(f"{day}\t{p}\t{self.control[p]}\n")
 
     def close(self):
-        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control, self.f_wars):
+        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control):
             f.close()
+
+
+class WarLog:
+    """war_stats.tsv (see the module docstring), read on its own thread once per in-game day: the country block costs
+    about a second, too slow for cmdrec's date loop but far lighter than the ~100 s log step, which at speed 4 left
+    three rows for the whole Polish campaign."""
+
+    def __init__(self, folder, tag):
+        self.folder, self.tag, self.day = folder, tag, None
+        path = os.path.join(folder, "war_stats.tsv")
+        new = not os.path.exists(path)
+        self.f = open(path, "a", encoding="utf-8")
+        if new:
+            self.f.write("date\t" + "\t".join(WAR_COLS) + "\n")
+            self.f.flush()
+        self.wars = {}                          # (first, second, start) -> last written values, so a restart carries on
+        with open(path, encoding="utf-8") as h:
+            for line in list(h)[1:]:
+                p = line.rstrip("\n").split("\t")
+                if len(p) == 1 + len(WAR_COLS):
+                    self.wars[tuple(p[1:4])] = p[1:]
+
+    def step(self, day):
+        if day == self.day:
+            return False
+        self.day = day
+        for row in war_rows(country_block(self.tag)):
+            if self.wars.get(tuple(row[:3])) != row:
+                self.wars[tuple(row[:3])] = row
+                self.f.write(day + "\t" + "\t".join(row) + "\n")
+        self.f.flush()
+        return True
+
+    def close(self):
+        self.f.close()
 
 
 class BattleLog:
@@ -230,7 +253,7 @@ class BattleLog:
         from hoi4ai.memory import Process
         self.folder, self.day, self.names, self._mgr = folder, None, None, None
         self.proc = Process()
-        self.f_battles = self._open("battles.tsv", "date	province	a_tags	a_divs	a_org	a_strength	b_tags	b_divs	b_org	b_strength")
+        self.f_battles = self._open("battles.tsv", "date	province	a_tags	a_divs	a_org	a_strength	b_tags	b_divs	b_org	b_strength	controller")
         self.f_battle_divs = self._open("battle_divisions.tsv", "date	province	side	division	owner	org	strength")
 
     _open = CountryLog._open
@@ -298,4 +321,5 @@ class BattleLog:
                 continue                        # the scan can list one combat twice
             seen.add("".join(lines))
             self.f_battle_divs.write("".join(lines))
+            row.append(self.names.tag(i32(prov + 0x188)))       # who holds the province today: the outcome, day by day
             self.f_battles.write("\t".join(row) + "\n")
