@@ -149,6 +149,38 @@ def sections(rec, tag, d0, d1, wars):
                     table(["enemy", "battle days"], [(nm(t), n) for t, n in days.most_common(12)]) +
                     "<h3>Busiest provinces</h3>" + table(["province", "battle days"], list(front.most_common(10)))))
 
+        # damage: each division's strength from the first to the last recorded day it fought in a province
+        hd, bd = rows_of(rec, "battle_divisions")
+        if bd:
+            jx = {c: i for i, c in enumerate(hd)}
+            track, fought = {}, {}
+            for r in bd:
+                k = (r[jx["province"]], r[jx["division"]])
+                s = (int(r[jx["strength"]]) / 1000, int(r[jx["org"]]) / 1000)
+                track.setdefault(k, [r[jx["owner"]], r[jx["date"]], s, r[jx["date"]], s])
+                track[k][3:] = [r[jx["date"]], s]
+                fought.setdefault(r[jx["province"]], set()).add(r[jx["date"]])
+            agg = {}
+            for (prov, _), (owner, d_a, s_a, d_b, s_b) in track.items():
+                if d_a == d_b or owner == "?":
+                    continue
+                g = agg.setdefault((prov, owner), [0, 0.0, 0.0, d_a, d_b])
+                g[0] += 1
+                g[1] += s_b[0] - s_a[0]
+                g[2] += s_b[1] - s_a[1]
+                g[3], g[4] = min(g[3], d_a), max(g[4], d_b)
+            mine = {p for (p, o) in agg if o == tag}
+            rows = [(p, f"{g[3]} to {g[4]}", nm(o), g[0], f"{g[1] / g[0]:+.1f}", f"{g[2] / g[0]:+.1f}")
+                    for (p, o), g in sorted(agg.items(), key=lambda kv: kv[1][1] / kv[1][0]) if p in mine]
+            if rows:
+                out.append(("Battle damage",
+                            "<p>For every province where " + esc(tag) + " fought and a division was recorded on more than one day: the mean change in "
+                            "strength (equipment and manpower, in points of 100) and organisation of that country's divisions from the first to "
+                            "the last day they were seen there. Strength lost is not men killed: a division that is reinforced or replaced "
+                            "hides some of its loss, and the recorder reads some days only (a step is longer than a game day at speed), so a "
+                            "fall between two far-apart days is the net, not the fight.</p>" +
+                            table(["province", "recorded", "country", "divisions", "strength", "organisation"], rows[:40])))
+
     h, nav = rows_of(rec, "naval", country=tag)
     if nav:
         def ships(state):
