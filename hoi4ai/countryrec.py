@@ -248,14 +248,14 @@ class WarLog:
 class CombatTrace:
     """battle_raw.tsv: the LAST raw state of every land combat before it ended. A CLandCombat holds running counters
     (casualty and air-damage totals the game shows in its battle log) and is freed when the fight ends, so a once-a-day
-    read never sees the final values. This polls the combat list about every second on its own thread, keeps each
+    read never sees the final values. This polls the combat list about every 0.1 s on its own thread, keeps each
     combat's latest bytes, and writes one row when it disappears: province, combat ticks (+0x40), game clock (+0x130),
     then hex of the combat (0x200 bytes), both sides (0x400 each) and each air entry (0xa0). Raw on purpose: decode
     from the file (the counters are not identified yet)."""
 
     COLS = "wall\tprovince\tticks\tclock\tcombat\tside_a\tside_b\tair_a\tair_b"
 
-    def __init__(self, folder, every=1.0):
+    def __init__(self, folder, every=0.1):          # a poll takes ~1 ms; a 1 s interval missed fights of a few ticks
         import threading
         from hoi4ai.memory import Process
         self.proc, self.every, self.live, self._mgr, self._stop = Process(), every, {}, None, threading.Event()
