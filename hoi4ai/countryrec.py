@@ -156,8 +156,6 @@ class CountryLog:
                     self.control[int(p[1])] = p[2]
         self.provinces, self.names = None, None
         self.f_wars = self._open("war_stats.tsv", "date\t" + "\t".join(WAR_COLS))
-        self.f_battles = self._open("battles.tsv", "date\tprovince\ta_tags\ta_divs\ta_org\ta_strength\tb_tags\tb_divs\tb_org\tb_strength")
-        self.f_battle_divs = self._open("battle_divisions.tsv", "date	province	side	division	owner	org	strength")
         self.wars = {}                          # (first, second, start) -> last written values
         with open(os.path.join(folder, "war_stats.tsv"), encoding="utf-8") as h:
             for line in list(h)[1:]:
@@ -195,15 +193,60 @@ class CountryLog:
             if self.wars.get(tuple(row[:3])) != row:
                 self.wars[tuple(row[:3])] = row
                 self.f_wars.write(day + "\t" + "\t".join(row) + "\n")
-        self._battles(day)
         new = [i for i in handles(block, 70) if i not in self.equipment]
         for eid, a in _addresses(70, new).items():
             v = self.reader.variant(a)
             self.f_eq.write(f"{eid}\t{v.name}\t{v.type}\t{','.join(v.modules)}\n")
             self.equipment.add(eid)
-        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control, self.f_wars, self.f_battles, self.f_battle_divs):
+        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control, self.f_wars):
             f.flush()
         return True
+
+    def _control(self, day):
+        """Who controls each province (live.Provinces): every province the first day, then only the changes. A state held
+        in part (a war's front line) shows here and not in states.tsv, which names one controller per state."""
+        from hoi4ai.eventrec import Names
+        from hoi4ai.live import Provinces
+        if self.provinces is None:
+            self.provinces, self.names = Provinces(self.proc), Names()
+        ctrl = self.provinces.refresh().controller
+        for p in range(1, len(ctrl)):
+            c = int(ctrl[p])
+            if c and self.control.get(p) != self.names.tag(c):
+                self.control[p] = self.names.tag(c)
+                self.f_control.write(f"{day}\t{p}\t{self.control[p]}\n")
+
+    def close(self):
+        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control, self.f_wars):
+            f.close()
+
+
+class BattleLog:
+    """battles.tsv and battle_divisions.tsv (see the module docstring), once per in-game day. Light (the combats are
+    one list in memory, about a millisecond), so cmdrec calls it from its date loop and not from the slow log step: a
+    step takes ~100 s, which at speed 4 skips most days."""
+
+    def __init__(self, folder):
+        from hoi4ai.memory import Process
+        self.folder, self.day, self.names, self._mgr = folder, None, None, None
+        self.proc = Process()
+        self.f_battles = self._open("battles.tsv", "date	province	a_tags	a_divs	a_org	a_strength	b_tags	b_divs	b_org	b_strength")
+        self.f_battle_divs = self._open("battle_divisions.tsv", "date	province	side	division	owner	org	strength")
+
+    _open = CountryLog._open
+
+    def step(self, day):
+        if day == self.day:
+            return False
+        self.day = day
+        self._battles(day)
+        self.f_battles.flush()
+        self.f_battle_divs.flush()
+        return True
+
+    def close(self):
+        self.f_battles.close()
+        self.f_battle_divs.close()
 
     def _battles(self, day):
         """Every land combat in the world right now, one row each (battles.tsv). Sides a and b are the combat's two
@@ -256,21 +299,3 @@ class CountryLog:
             seen.add("".join(lines))
             self.f_battle_divs.write("".join(lines))
             self.f_battles.write("\t".join(row) + "\n")
-
-    def _control(self, day):
-        """Who controls each province (live.Provinces): every province the first day, then only the changes. A state held
-        in part (a war's front line) shows here and not in states.tsv, which names one controller per state."""
-        from hoi4ai.eventrec import Names
-        from hoi4ai.live import Provinces
-        if self.provinces is None:
-            self.provinces, self.names = Provinces(self.proc), Names()
-        ctrl = self.provinces.refresh().controller
-        for p in range(1, len(ctrl)):
-            c = int(ctrl[p])
-            if c and self.control.get(p) != self.names.tag(c):
-                self.control[p] = self.names.tag(c)
-                self.f_control.write(f"{day}\t{p}\t{self.control[p]}\n")
-
-    def close(self):
-        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control, self.f_wars, self.f_battles, self.f_battle_divs):
-            f.close()

@@ -220,6 +220,7 @@ def main():
         os.path.join(folder, "research.tsv"), events.names, [tag], others)
     plans = None if a.no_plans else planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = None if a.no_country else countryrec.CountryLog(folder, tag)
+    battles = None if a.no_country else countryrec.BattleLog(folder)   # light: read in the date loop, every day
     loggers = [(n, v) for n, v in (("templates", templates), ("designs", designs), ("production", production),
                                    ("mios", mios), ("market", market), ("doctrines", doctrines),
                                    ("spirits", spirits), ("politics", politics), ("economy", economy),
@@ -304,6 +305,11 @@ def main():
                     # unit leaders and more, so the class filter matters): two blocks with the same day
                     send(f"bridge.snap {day} 51 {SNAP_FIELDS}", f"bridge.snap {day} 4713 {SNAP_FIELDS}")
                     last_day = day
+                    if battles and day:
+                        try:
+                            battles.step(day)
+                        except Exception as e:  # noqa: BLE001
+                            print(f"\nbattles: {type(e).__name__}: {e}")
             time.sleep(a.interval)
     except KeyboardInterrupt:
         print()
@@ -313,6 +319,8 @@ def main():
         stop.set()
         wake.set()
         worker.join()
+        if battles:
+            battles.close()
         print(send("bridge.cmdrec off")[0])
         events.step()
         shared.new_step()
