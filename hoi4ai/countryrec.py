@@ -222,7 +222,18 @@ class CountryLog:
             return struct.unpack("<i", b)[0] if b else 0
 
         seen = set()
-        for c in self.proc.find_objects("CLandCombat"):
+        # the CCombatManager (one object, found once) keeps the live combats as a vector at +0x8, count at +0x10:
+        # land, naval and a few other objects, so the class is checked. Scanning all of memory for CLandCombat took 10 s.
+        if getattr(self, "_mgr", None) is None or self.proc.class_of(self._mgr) != "CCombatManager":
+            found = self.proc.find_objects("CCombatManager")
+            self._mgr = found[0] if found else None
+        if self._mgr is None:
+            return
+        ptr, count = u64(self._mgr + 8), i32(self._mgr + 0x10)
+        combats = [u64(ptr + 8 * k) for k in range(count if 0 < count < 5000 else 0)]
+        for c in combats:
+            if not c or self.proc.class_of(c) != "CLandCombat":
+                continue
             prov = u64(c + 0x38)
             sides = [u64(c + 0x28), u64(c + 0x30)]
             if not prov or not all(sides) or any(self.proc.class_of(s) != "CLandCombatant" for s in sides):
