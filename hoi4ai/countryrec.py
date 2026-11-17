@@ -245,6 +245,87 @@ class WarLog:
         self.f.close()
 
 
+class CombatTrace:
+    """battle_raw.tsv: the LAST raw state of every land combat before it ended. A CLandCombat holds running counters
+    (casualty and air-damage totals the game shows in its battle log) and is freed when the fight ends, so a once-a-day
+    read never sees the final values. This polls the combat list about every second on its own thread, keeps each
+    combat's latest bytes, and writes one row when it disappears: province, combat ticks (+0x40), game clock (+0x130),
+    then hex of the combat (0x200 bytes), both sides (0x400 each) and each air entry (0xa0). Raw on purpose: decode
+    from the file (the counters are not identified yet)."""
+
+    COLS = "wall\tprovince\tticks\tclock\tcombat\tside_a\tside_b\tair_a\tair_b"
+
+    def __init__(self, folder, every=1.0):
+        import threading
+        from hoi4ai.memory import Process
+        self.proc, self.every, self.live, self._mgr, self._stop = Process(), every, {}, None, threading.Event()
+        path = os.path.join(folder, "battle_raw.tsv")
+        new = not os.path.exists(path)
+        self.f = open(path, "a", encoding="utf-8")
+        if new:
+            self.f.write(self.COLS + "\n")
+            self.f.flush()
+        self.t = threading.Thread(target=self._run, daemon=True)
+        self.t.start()
+
+    def _run(self):
+        while not self._stop.wait(self.every):
+            try:
+                self._poll()
+            except Exception as e:
+                print(f"\ncombat trace: {type(e).__name__}: {e}")
+
+    def _poll(self):
+        import struct
+        u64, rd = self.proc.u64, self.proc.read
+        if self._mgr is None or self.proc.class_of(self._mgr) != "CCombatManager":
+            found = self.proc.find_objects("CCombatManager")
+            self._mgr = found[0] if found else None
+        if self._mgr is None:
+            return
+        b = rd(self._mgr + 0x10, 4)
+        count = struct.unpack("<i", b)[0] if b else 0
+        ptr = u64(self._mgr + 8)
+        now = set()
+        for k in range(count if 0 < count < 5000 else 0):
+            c = u64(ptr + 8 * k)
+            if not c or self.proc.class_of(c) != "CLandCombat":
+                continue
+            sides = [u64(c + 0x28), u64(c + 0x30)]
+            prov = u64(c + 0x38)
+            if not prov or not all(sides) or any(self.proc.class_of(s) != "CLandCombatant" for s in sides):
+                continue
+            now.add(c)
+            cb, sa, sb = rd(c, 0x200), rd(sides[0], 0x400), rd(sides[1], 0x400)
+            air = []
+            for s in sides:
+                vp, cn = u64(s + 0x140), struct.unpack("<i", rd(s + 0x148, 4) or bytes(4))[0]
+                parts = []
+                for j in range(cn if 0 < cn < 100 else 0):
+                    el = u64(vp + 8 * j)
+                    if el and self.proc.class_of(el) == "CAirInLandCombat":
+                        parts.append((rd(el, 0xa0) or b"").hex())
+                air.append(",".join(parts))
+            if cb and sa and sb:
+                pid = struct.unpack("<i", rd(prov + 0xa4, 4) or bytes(4))[0]
+                self.live[c] = (pid, cb, sa, sb, air)
+        for c in [c for c in self.live if c not in now]:
+            self._write(self.live.pop(c))
+
+    def _write(self, snap):
+        import struct, time
+        pid, cb, sa, sb, air = snap
+        ticks, clock = struct.unpack_from("<i", cb, 0x40)[0], struct.unpack_from("<i", cb, 0x130)[0]
+        self.f.write("\t".join([str(int(time.time())), str(pid), str(ticks), str(clock), cb.hex(), sa.hex(), sb.hex(),
+                                air[0], air[1]]) + "\n")
+        self.f.flush()
+
+    def close(self):
+        self._stop.set()
+        self.t.join(5)
+        self.f.close()
+
+
 class BattleLog:
     """battles.tsv and battle_divisions.tsv (see the module docstring), once per in-game day. Light (the combats are
     one list in memory, about a millisecond), so cmdrec calls it from its date loop and not from the slow log step: a

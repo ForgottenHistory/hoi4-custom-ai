@@ -221,6 +221,7 @@ def main():
     plans = None if a.no_plans else planrec.PlanLog(os.path.join(folder, "plans.tsv"), tag)
     country = None if a.no_country else countryrec.CountryLog(folder, tag)
     battles = None if a.no_country else countryrec.BattleLog(folder)   # light: read in the date loop, every day
+    trace = None if a.no_country else countryrec.CombatTrace(folder)   # own thread, ~1 s polls: last raw state of each combat
     wars = None if a.no_country else countryrec.WarLog(folder, tag)    # ~1 s: on its own thread, every day it gets to
     loggers = [(n, v) for n, v in (("templates", templates), ("designs", designs), ("production", production),
                                    ("mios", mios), ("market", market), ("doctrines", doctrines),
@@ -335,7 +336,7 @@ def main():
         wake.set()
         worker.join()
         war_worker.join()
-        for lg in (battles, wars):
+        for lg in (battles, wars, trace):
             if lg:
                 lg.close()
         print(send("bridge.cmdrec off")[0])
