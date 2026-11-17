@@ -65,6 +65,35 @@ def states():
     return {i: (o, ctrl.get(i, o), " ".join(sorted(core.get(i, [])))) for i, o in owner.items()}
 
 
+WAR_COLS = ["first", "second", "start", "first_casualties", "second_casualties"] + [
+    f"{side}_{k}" for side in ("first", "second")
+    for k in ("equipment_damage", "province_capture", "air_damage_str", "strategic_air", "sunk_ship", "convoy_attack",
+              "score_casualties", "captured")]
+
+
+def war_rows(block):
+    """[[value text per WAR_COLS]] for every war_relation of the country's block: the war summary's casualties
+    (manpower, cumulative, both sides) and each side's war-score parts (equipment damage, provinces, air, ships sunk,
+    convoys, casualties; captured = number of provinces taken)."""
+    from hoi4ai.wars import _blocks, _field
+    rows = []
+    for w in _blocks(block):
+        row = [_field(w, "first") or "", _field(w, "second") or "", _field(w, "start_date") or "",
+               _field(w, "first_casualties") or "0", _field(w, "second_casualties") or "0"]
+        for side in ("first_vs_second", "second_vs_first"):
+            m = re.search(r"war_score_" + side + r"=\{", w)
+            part = w[m.end():w.find("\n\t\t\t\t\t\t}", m.end())] if m else ""
+            for k in ("equipment_damage", "province_capture", "air_damage_str", "strategic_air", "sunk_ship", "convoy_attack"):
+                v = re.search(r"\b" + k + r"=(-?[\d.]+)", part)
+                row.append(v.group(1) if v else "0")
+            v = re.search(r"\bcasualties=(-?[\d.]+)", part)
+            row.append(v.group(1) if v else "0")
+            c = re.search(r"captured_provinces=\{([^}]*)\}", part)
+            row.append(str(len(c.group(1).split())) if c else "0")
+        rows.append(row)
+    return rows
+
+
 def intel(tag):
     """[(target tag, civilian, army, navy, air)] for every other existing country (value texts)."""
     lines = query(f'every_country = {{ limit = {{ exists = yes NOT = {{ tag = {tag} }} }} {tag} = {{ log = "[PREV.GetTag]'
@@ -121,6 +150,13 @@ class CountryLog:
                 if len(p) == 3 and p[1].isdigit():
                     self.control[int(p[1])] = p[2]
         self.provinces, self.names = None, None
+        self.f_wars = self._open("war_stats.tsv", "date\t" + "\t".join(WAR_COLS))
+        self.wars = {}                          # (first, second, start) -> last written values
+        with open(os.path.join(folder, "war_stats.tsv"), encoding="utf-8") as h:
+            for line in list(h)[1:]:
+                p = line.rstrip("\n").split("\t")
+                if len(p) == 1 + len(WAR_COLS):
+                    self.wars[tuple(p[1:4])] = p[1:]
 
     def _open(self, name, header):
         path = os.path.join(self.folder, name)
@@ -148,12 +184,16 @@ class CountryLog:
                 self.f_states.write(f"{day}\t{sid}\t{v[0]}\t{v[1]}\t{v[2]}\n")
                 self.states[sid] = v
         self._control(day)
+        for row in war_rows(block):
+            if self.wars.get(tuple(row[:3])) != row:
+                self.wars[tuple(row[:3])] = row
+                self.f_wars.write(day + "\t" + "\t".join(row) + "\n")
         new = [i for i in handles(block, 70) if i not in self.equipment]
         for eid, a in _addresses(70, new).items():
             v = self.reader.variant(a)
             self.f_eq.write(f"{eid}\t{v.name}\t{v.type}\t{','.join(v.modules)}\n")
             self.equipment.add(eid)
-        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control):
+        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control, self.f_wars):
             f.flush()
         return True
 
@@ -172,5 +212,5 @@ class CountryLog:
                 self.f_control.write(f"{day}\t{p}\t{self.control[p]}\n")
 
     def close(self):
-        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control):
+        for f in (self.f_num, self.f_eq, self.f_intel, self.f_states, self.f_control, self.f_wars):
             f.close()
