@@ -94,6 +94,61 @@ def sections(rec, tag, d0, d1, wars):
                     "<h3>Attacks per month</h3>" +
                     chart([("attacks", [(datetime.date(y, m, 15), n) for (y, m), n in sorted(per.items())])], d0, d1, wars, bars=True, height=150)))
 
+    # casualties: war_stats.tsv (tools/war_stats.py backfills it into hoi4-custom-ai/recordings/NAME)
+    own = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "recordings", os.path.basename(os.path.normpath(rec)))
+    h = ws = None
+    for folder in (rec, own):
+        h, ws = rows_of(folder, "war_stats")
+        if ws:
+            rec_ws = folder
+            break
+    if ws:
+        ix = {c: i for i, c in enumerate(h)}
+        last = {}
+        for r in ws:
+            last[(r[ix["first"]], r[ix["second"]], r[ix["start"]])] = r
+        by, tot, rows = {}, {}, []
+        for r in ws:
+            k = (r[ix["first"]], r[ix["second"]], r[ix["start"]])
+            mine_first = r[ix["first"]] == tag
+            tot[k] = (int(float(r[ix["first_casualties" if mine_first else "second_casualties"]])),
+                      int(float(r[ix["second_casualties" if mine_first else "first_casualties"]])))
+            d = day(r[0])
+            if d:
+                by[(d.year, d.month)] = Counter({"our losses": sum(v[0] for v in tot.values()),
+                                                 "enemy losses": sum(v[1] for v in tot.values())})
+        for k, r in sorted(last.items(), key=lambda kv: kv[0][2]):
+            me = "first" if k[0] == tag else "second"
+            you = "second" if me == "first" else "first"
+            ours, theirs = tot[k]
+            rows.append((nm(k[1] if me == "first" else k[0]), esc("-".join(f"{int(x):02d}" if i else x for i, x in enumerate(r[ix["start"]].split(".")[:3]))), f"{ours:,}", f"{theirs:,}",
+                         f"{theirs / ours:.1f}" if ours else "-", int(float(r[ix[me + "_captured"]])),
+                         int(float(r[ix[me + "_sunk_ship"]]))))
+        out.append(("Casualties",
+                    f"<p>Manpower lost by {esc(tag)} and by each enemy, cumulative over every war {esc(tag)} fought (the game's own "
+                    "war_relation counters, read daily from the country block: war_stats.tsv). Wars between other countries are not in it.</p>" +
+                    chart(stack_series(by, ["our losses", "enemy losses"], d0, d1), d0, d1, wars, height=190) +
+                    table(["enemy", "start", "our losses", "enemy losses", "kill ratio", "provinces taken", "ships sunk"], rows)))
+
+    # battles: battles.tsv + battle_divisions.tsv (live recordings from 2026-11-17 on)
+    hb, bt = rows_of(rec, "battles")
+    if bt:
+        ix = {c: i for i, c in enumerate(hb)}
+        days, front = Counter(), Counter()
+        for r in bt:
+            a, b = r[ix["a_tags"]].split(), r[ix["b_tags"]].split()
+            if tag in a or tag in b:
+                other = {t for t in (b if tag in a else a) if t != tag and t != "?"}
+                for t in other:
+                    days[t] += 1
+                front[r[ix["province"]]] += 1
+        out.append(("Battles",
+                    "<p>Land combats involving " + esc(tag) + " per enemy, counted in recorded days (a battle fought for three days counts three), "
+                    "from battles.tsv (every combat in the world, daily). Damage per division is in battle_divisions.tsv "
+                    "(the fall in strength between days).</p>" +
+                    table(["enemy", "battle days"], [(nm(t), n) for t, n in days.most_common(12)]) +
+                    "<h3>Busiest provinces</h3>" + table(["province", "battle days"], list(front.most_common(10)))))
+
     h, nav = rows_of(rec, "naval", country=tag)
     if nav:
         def ships(state):
