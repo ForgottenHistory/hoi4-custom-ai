@@ -149,6 +149,40 @@ def sections(rec, tag, d0, d1, wars):
                     table(["enemy", "battle days"], [(nm(t), n) for t, n in days.most_common(12)]) +
                     "<h3>Busiest provinces</h3>" + table(["province", "battle days"], list(front.most_common(10)))))
 
+        # results: per province, from the controller column (recordings made after 2026-11-17 evening; absent = no section)
+        if "controller" in ix:
+            lastday = max(r[ix["date"]] for r in bt)
+            prov = {}
+            for r in bt:            # rows are in date order
+                a, b = r[ix["a_tags"]].split(), r[ix["b_tags"]].split()
+                if tag not in a and tag not in b:
+                    continue
+                p = prov.setdefault(r[ix["province"]], {"first": r[ix["date"]], "days": set(), "att": None, "c0": r[ix["controller"]]})
+                if p["att"] is None:
+                    p["att"] = a[0] if a else "?"       # side a: most likely the attacker
+                    p["def"] = b[0] if b else "?"
+                p["days"].add(r[ix["date"]])
+                p["last"], p["c1"] = r[ix["date"]], r[ix["controller"]]
+            res = []
+            for pid, p in sorted(prov.items(), key=lambda kv: kv[1]["first"]):
+                if p["last"] == lastday:
+                    out_ = "still fighting"
+                elif p["c1"] == p["att"] and p["c0"] != p["att"]:
+                    out_ = "attacker took it"
+                elif p["c1"] == p["c0"]:
+                    out_ = "held"
+                else:
+                    out_ = "changed hands (" + nm(p["c1"]) + ")"
+                res.append((pid, p["first"], p["last"], len(p["days"]), nm(p["att"]) + " vs " + nm(p["def"]), out_))
+            if res:
+                tally = Counter(r[5].split(" (")[0] for r in res)
+                out.append(("Battle results",
+                            "<p>Each province " + esc(tag) + " fought in: first and last day of combat, battle days, the side that started "
+                            "as side a (most likely the attacker, since the Polish campaign: about 9 in 10 of Germany's fights were side a) and "
+                            "who held the province when the last battle was seen. " + ", ".join(f"{k}: {v}" for k, v in tally.most_common()) +
+                            ". The controller is read from the province each day, so a province lost and retaken shows as held.</p>" +
+                            table(["province", "first", "last", "battle days", "attacker vs defender", "result"], res[:60])))
+
         # damage: each division's strength from the first to the last recorded day it fought in a province
         hd, bd = rows_of(rec, "battle_divisions")
         if bd:
