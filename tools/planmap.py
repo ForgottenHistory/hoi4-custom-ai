@@ -17,10 +17,11 @@ from PIL import Image, ImageDraw
 import _bridge  # noqa: F401
 from controller import country_ids, game_time
 from heatmap import OTHER, OURS, FOE, SEA, font, panel
-from hoi4ai import mapdata, plans
+from hoi4ai import plans
+from hoi4rec import mapdata
 from hoi4ai.divisions import Snapshotter
-from hoi4ai.live import Provinces
-from hoi4ai.memory import Process
+from hoi4rec.live import Provinces
+from hoi4rec.memory import Process
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COLOURS = [(230, 25, 75), (60, 140, 60), (0, 110, 200), (245, 130, 48), (145, 30, 180), (70, 190, 190),

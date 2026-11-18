@@ -39,9 +39,12 @@ border, a fast army breaks through along the cheapest route to the enemy's victo
 2. Clone this repo next to it, so the layout is
 
         hoi4-bridge/
+        hoi4-recorder/
         hoi4-custom-ai/
 
-   or set `HOI4_BRIDGE_CLIENT` to the bridge's `client/` folder.
+   or set `HOI4_BRIDGE_CLIENT` / `HOI4_RECORDER` to the bridge's `client/` folder and the recorder repo.
+   [hoi4-recorder](../hoi4-recorder) holds the recorders, the game-reading helpers (`hoi4rec`: memory, game files,
+   map) and the report; this repo's planner imports them.
 3. `pip install -r requirements.txt` (Python 3.10+).
 
 ## Quick start
@@ -67,7 +70,6 @@ To see what the planner sees without touching the game:
 | `ai_only.py` | switch the game's AI off for every country except the ones named |
 | `heatmap.py`, `oddsmap.py`, `planmap.py`, `defence.py` | draw what the planner sees (PNG; sends nothing) |
 | `battlerec.py`, `compare_runs.py`, `runmap.py` | record wars and compare how different players/AIs fought them |
-| `cmdrec.py`, `analyze_cmdrec.py`, `analyze_snaps.py` | record and analyse every command the game executes |
 | `mapcheck.py`, `templates.py` | check the map data against the game; list a country's division templates |
 
 Usage and options for each are in [docs/tools.md](docs/tools.md).
@@ -77,11 +79,11 @@ Usage and options for each are in [docs/tools.md](docs/tools.md).
 - [docs/tools.md](docs/tools.md): every script in `tools/`
 - [docs/planner.md](docs/planner.md): how the planner decides, and what each `hoi4ai/` module does
 - [docs/findings.md](docs/findings.md): how the game AI plays compared with a player (Germany vs Poland, 1939)
-- [docs/game-layouts.md](docs/game-layouts.md): memory layouts of the game objects we read (game 1.19.x)
+- [hoi4-recorder docs](../hoi4-recorder/docs): recording tools, the report, and memory layouts of the game objects we read
 
 ## Layout
 
-    hoi4ai/       the library: game files, map, memory reading, planner
+    hoi4ai/       the planner library (game files, map and memory reading live in hoi4-recorder's hoi4rec)
     tools/        command-line scripts
     docs/         documentation
     recordings/   recorded games (git-ignored)

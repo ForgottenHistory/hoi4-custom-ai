@@ -17,10 +17,11 @@ from PIL import Image, ImageDraw
 import _bridge  # noqa: F401
 from controller import country_ids, enemies_of, game_time, subjects_of
 from heatmap import FOE, FRIEND, OTHER, OURS, SEA, font, panel, ramp
-from hoi4ai import battle, mapdata, templates
+from hoi4ai import battle
+from hoi4rec import mapdata, templates
 from hoi4ai.divisions import Snapshotter
-from hoi4ai.live import Provinces
-from hoi4ai.memory import Process
+from hoi4rec.live import Provinces
+from hoi4rec.memory import Process
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ODDS = [(200, 30, 30), (245, 150, 60), (250, 230, 120), (150, 210, 100), (20, 130, 50)]

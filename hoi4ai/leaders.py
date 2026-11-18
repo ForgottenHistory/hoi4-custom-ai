@@ -86,7 +86,7 @@ def conditions(files=None):
     global _CONDITIONS
     if _CONDITIONS is not None:
         return _CONDITIONS
-    from .gamefiles import GameFiles
+    from hoi4rec.gamefiles import GameFiles
     files = files or GameFiles()
     out = {}
     for path in files.listdir("common/characters", ".txt").values():

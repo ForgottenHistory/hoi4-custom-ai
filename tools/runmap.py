@@ -24,8 +24,8 @@ import _bridge  # noqa: F401
 from compare_runs import FMT, Run, vp_names
 from controller import REPO
 from heatmap import OTHER, SEA, font, panel
-from hoi4ai import mapdata, units
-from hoi4ai.gamefiles import GameFiles
+from hoi4rec import mapdata, units
+from hoi4rec.gamefiles import GameFiles
 
 HOME, TAKEN, HELD = (214, 219, 228), (126, 156, 204), (238, 196, 178)
 FAST, INF, FOE = (24, 48, 112), (70, 110, 180), (178, 34, 34)

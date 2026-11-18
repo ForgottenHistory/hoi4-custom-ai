@@ -17,8 +17,8 @@ import re
 import sys
 
 import _bridge  # noqa: F401
-from hoi4ai import mapdata, units
-from hoi4ai.gamefiles import GameFiles
+from hoi4rec import mapdata, units
+from hoi4rec.gamefiles import GameFiles
 
 FMT = "%Y-%m-%d %H:00"
 

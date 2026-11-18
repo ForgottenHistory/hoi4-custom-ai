@@ -16,18 +16,19 @@ import datetime
 import os
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 import _bridge  # noqa: F401
 from controller import country_ids, enemies_of, friends_of, game_time
-from hoi4ai import mapdata, units
+from hoi4rec import mapdata, units
+from hoi4rec.drawing import SEA, font, panel, ramp
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.front import Planner
-from hoi4ai.live import Provinces
+from hoi4rec.live import Provinces
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-SEA, OTHER, OURS, FOE, FRIEND = (172, 198, 222), (222, 219, 210), (236, 232, 220), (240, 222, 222), (228, 232, 222)
+OTHER, OURS, FOE, FRIEND = (222, 219, 210), (236, 232, 220), (240, 222, 222), (228, 232, 222)
 HOT = [(255, 245, 170), (253, 174, 60), (215, 48, 31), (120, 0, 30)]
 COLD = [(222, 235, 247), (130, 180, 215), (33, 102, 172), (8, 40, 100)]
 GREEN = [(220, 240, 210), (120, 195, 110), (20, 120, 50), (0, 60, 25)]
@@ -35,42 +36,11 @@ PURPLE = [(225, 205, 240), (170, 110, 210), (110, 30, 160), (60, 0, 100)]
 RED = [(250, 220, 210), (240, 130, 110), (190, 30, 30), (100, 0, 10)]
 
 
-def ramp(stops, x):
-    x = min(max(x, 0.0), 1.0) * (len(stops) - 1)
-    i = min(int(x), len(stops) - 2)
-    f = x - i
-    return tuple(int(a + (b - a) * f) for a, b in zip(stops[i], stops[i + 1]))
-
-
 def ranks(values):
     """{key: 0..1} by rank, so a few large values don't wash out the rest."""
     order = sorted(values, key=values.get)
     n = max(1, len(order) - 1)
     return {k: i / n for i, k in enumerate(order)}
-
-
-def font(size):
-    for name in ("segoeui.ttf", "arial.ttf"):
-        try:
-            return ImageFont.truetype(os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", name), size)
-        except OSError:
-            pass
-    return ImageFont.load_default()
-
-
-def panel(ids, crop, scale, colours, base):
-    """Colour each province pixel by colours.get(id, base(id)), draw province and controller borders."""
-    y0, y1, x0, x1 = crop
-    sub = ids[y0:y1, x0:x1]
-    uniq, inv = np.unique(sub, return_inverse=True)
-    lut = np.array([colours.get(int(u), base(int(u))) for u in uniq], np.uint8)
-    rgb = lut[inv.reshape(sub.shape)]
-    edge = np.zeros(sub.shape, bool)
-    edge[:, 1:] |= sub[:, 1:] != sub[:, :-1]
-    edge[1:, :] |= sub[1:, :] != sub[:-1, :]
-    rgb[edge] = (rgb[edge] * 0.72).astype(np.uint8)
-    img = Image.fromarray(rgb, "RGB")
-    return img.resize((img.width * scale, img.height * scale), Image.NEAREST)
 
 
 def main():

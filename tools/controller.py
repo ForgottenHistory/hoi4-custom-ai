@@ -26,11 +26,12 @@ import time
 
 import _bridge  # noqa: F401
 from hoi4bridge import BridgeError, BridgeUnavailable, query, send, trigger
-from hoi4ai import defence, defend, leaders as leaders_mod, mapdata, organize, plans, templates, units
+from hoi4ai import defence, defend, leaders as leaders_mod, organize, plans
+from hoi4rec import mapdata, templates, units
 from hoi4ai.battlerec import BattleRecorder
 from hoi4ai.divisions import Snapshotter
 from hoi4ai.front import Planner
-from hoi4ai.live import Provinces
+from hoi4rec.live import Provinces
 import takeover
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -112,7 +113,7 @@ _proc = []
 
 def _pointer_at(addr):
     """The 8 bytes at ADDR, read from the game's memory directly (no bridge request); 0 if unreadable."""
-    from hoi4ai.memory import Process
+    from hoi4rec.memory import Process
     if not addr:
         return 0
     for attempt in range(2):
@@ -178,7 +179,7 @@ def build_structure(m, provinces, divs, tag, me, tgt, fast_units, friend_ids, ca
     """Build the armies, generals and the army group (hoi4ai/organize.py) with bridge.army.
     Returns (summary lines, army group id or 0, the group's army ids, {division id: army id})."""
     lead = leaders_mod.usable(tag, leaders_mod.load(tag, os.path.join(cache, "leaders.tsv")))
-    from hoi4ai.memory import Process
+    from hoi4rec.memory import Process
     secs = plans.sections(Process(), me, tgt, provinces.controller)
     own = {p for p in m.provinces if m.is_land(p) and provinces.controller[p] in {me, *friend_ids}}
     group, others, marshal = organize.plan(m, provinces.controller, divs, tag, me, tgt, fast_units, lead, friend_ids,
@@ -327,8 +328,8 @@ def main():
     stats_day = None  # templates' stats (roles): at the start, then again when a new template shows up
 
     def load_stats(divs):
-        from hoi4ai import templates
-        from hoi4ai.memory import Process
+        from hoi4rec import templates
+        from hoi4rec.memory import Process
         proc = Process()
         st = planner.stats
         if not st or any(d.owner == tag and d.template not in st for d in divs):
@@ -380,7 +381,7 @@ def main():
 
     def load_forces(divs, foe_tags):
         """--defend: both armies' stats per width (the combat model) and our templates' speeds (the reserve)."""
-        from hoi4ai.memory import Process
+        from hoi4rec.memory import Process
         proc = Process()
 
         def army(tags_):
@@ -437,7 +438,7 @@ def main():
     state_path = os.path.join(REPO, ".cache", "plans_state.json")
     if a.plans and group_armies and not a.dry_run and os.path.exists(state_path):
         # a restart: keep the plans the game holds (redrawing them would throw away the planning built up)
-        from hoi4ai.memory import Process
+        from hoi4rec.memory import Process
         st = json.load(open(state_path, encoding="utf-8"))
         proc = Process()
         # every army still holds its lines before the war; once fighting, the game uses lines up and splits them,
@@ -458,7 +459,7 @@ def main():
         """Battle plans for every army at the border with the target: the game's fronts with it only exist in
         war, so before the war this finds none and is tried again when the war starts. True when drawn."""
         nonlocal planned, drawn, zone_specs
-        from hoi4ai.memory import Process
+        from hoi4rec.memory import Process
         provinces.refresh()
         divs0 = take()
         # every army that stands at the border (the fast one too); a restart redraws the plans
@@ -695,7 +696,7 @@ def main():
                 # the game sometimes drops an army's front line or offensive line on its own (no command does it;
                 # two armies lost theirs when the war was declared): draw it again. In war only a lost front line
                 # (an offensive line can be finished), once a day per army
-                from hoi4ai.memory import Process
+                from hoi4rec.memory import Process
                 proc = Process()
                 lost, fixed = [], []
                 for aid, p in sorted(drawn.items()):

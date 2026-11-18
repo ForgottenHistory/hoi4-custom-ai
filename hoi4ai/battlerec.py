@@ -21,7 +21,7 @@ import os
 
 import numpy as np
 
-from hoi4ai import wars
+from hoi4rec import wars
 
 
 class BattleRecorder:

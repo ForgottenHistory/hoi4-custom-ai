@@ -19,11 +19,12 @@ import _bridge  # noqa: F401
 from compare_runs import vp_names
 from controller import REPO, country_ids, friends_of, game_time
 from heatmap import COLD, OTHER, SEA, font, panel, ramp
-from hoi4ai import defence, defend, mapdata, templates
+from hoi4ai import defence, defend
+from hoi4rec import mapdata, templates
 from hoi4ai.divisions import Snapshotter
-from hoi4ai.gamefiles import GameFiles
-from hoi4ai.live import Provinces
-from hoi4ai.memory import Process
+from hoi4rec.gamefiles import GameFiles
+from hoi4rec.live import Provinces
+from hoi4rec.memory import Process
 
 FOE, MAIN, FALLBACK, LOST = (232, 200, 200), (200, 20, 20), (240, 150, 0), (238, 236, 226)
 

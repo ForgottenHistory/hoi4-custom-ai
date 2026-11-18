@@ -10,8 +10,8 @@ import collections
 import time
 
 import _bridge  # noqa: F401
-from hoi4ai import mapdata
-from hoi4ai.gamefiles import GameFiles
+from hoi4rec import mapdata
+from hoi4rec.gamefiles import GameFiles
 
 
 def main():
@@ -35,7 +35,7 @@ def main():
     if a.no_live:
         return
 
-    from hoi4ai.live import Provinces
+    from hoi4rec.live import Provinces
     from hoi4bridge import send
     t = time.time()
     lp = Provinces()

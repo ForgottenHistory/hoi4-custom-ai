@@ -13,9 +13,9 @@ import sys
 
 import _bridge  # noqa: F401
 from controller import REPO
-from hoi4ai import templates
+from hoi4rec import templates
 from hoi4ai.divisions import Snapshotter
-from hoi4ai.memory import Process
+from hoi4rec.memory import Process
 
 
 def main():

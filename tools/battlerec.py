@@ -31,10 +31,10 @@ import time
 
 import _bridge  # noqa: F401
 from hoi4bridge import BridgeError, BridgeUnavailable, send, trigger
-from hoi4ai import airrec, countryrec, decisionrec, deploymentrec, doctrinerec, diplomacyrec, economyrec, equipmentrec, eventrec, generalrec, intelligencerec, logisticsrec, marketrec, miorec, navalrec, occupationrec, planrec, politicsrec, productionrec, researchrec, shared, spiritrec, templaterec
+from hoi4rec import airrec, countryrec, decisionrec, deploymentrec, doctrinerec, diplomacyrec, economyrec, equipmentrec, eventrec, generalrec, intelligencerec, logisticsrec, marketrec, miorec, navalrec, occupationrec, planrec, politicsrec, productionrec, researchrec, shared, spiritrec, templaterec
 from hoi4ai.battlerec import BattleRecorder
 from hoi4ai.divisions import Snapshotter
-from hoi4ai.live import Provinces
+from hoi4rec.live import Provinces
 from controller import REPO, country_ids, enemies_of, game_time
 
 

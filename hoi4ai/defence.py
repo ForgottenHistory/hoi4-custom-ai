@@ -26,8 +26,8 @@ import collections
 import heapq
 import math
 
-from . import pdx
-from .gamefiles import GameFiles
+from hoi4rec import pdx
+from hoi4rec.gamefiles import GameFiles
 
 DIVISION_WIDTH = 18
 
